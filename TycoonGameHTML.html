@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title id="title">City Builder 3D</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+
+      #gameCanvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #ui {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      #stats {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 14px;
+      }
+
+      #buildMenu {
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        display: flex;
+        gap: 10px;
+      }
+
+      #upgradeMenu {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        width: 250px;
+      }
+
+      #buildingInfo {
+        position: absolute;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        width: 300px;
+        display: none;
+      }
+
+      #notifications {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .notification {
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        transition: opacity 0.5s;
+      }
+
+      .notification.fade-out {
+        opacity: 0;
+      }
+
+      button {
+        pointer-events: auto;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+      }
+
+      button.active {
+        background-color: #2196f3;
+      }
+
+      .stat-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+      }
+
+      .happiness-bar {
+        width: 100%;
+        height: 10px;
+        background-color: #444;
+        border-radius: 5px;
+        margin-top: 5px;
+        overflow: hidden;
+      }
+
+      #happinessBar {
+        height: 100%;
+        width: 50%;
+        background-color: #44aa44;
+        transition: width 0.5s, background-color 0.5s;
+      }
+      #loadingScreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #2c3e50;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        color: white;
+        transition: opacity 0.5s;
+      }
+
+      .loading-content {
+        text-align: center;
+      }
+
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 5px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+        margin: 20px auto;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loadingScreen">
+      <div class="loading-content">
+        <h1>City Tycoon</h1>
+        <div class="spinner"></div>
+        <p>Building your city...</p>
+      </div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui">
+      <div id="stats">
+        <div class="stat-row">
+          <span>Money:</span>
+          <span id="money">$10,000</span>
+        </div>
+        <div class="stat-row">
+          <span>Population:</span>
+          <span id="population">0</span>
+        </div>
+        <div class="stat-row">
+          <span>Happiness:</span>
+          <span id="happiness">50%</span>
+        </div>
+        <div class="happiness-bar">
+          <div id="happinessBar"></div>
+        </div>
+      </div>
+
+      <div id="buildMenu">
+        <button id="buildResidential" class="build-button">Residential</button>
+        <button id="buildCommercial" class="build-button">Commercial</button>
+        <button id="buildIndustrial" class="build-button">Industrial</button>
+        <button id="buildRoad" class="build-button">Road</button>
+        <button id="buildPark" class="build-button">Park</button>
+        <button id="cancelBuild">Cancel</button>
+    </div>
+    
+      <div id="upgradeMenu">
+        <h3>City Upgrades</h3>
+        <button id="upgradeTaxCollection">
+          Tax Collection (Level 1) - $5,000
+        </button>
+        <button id="upgradeBuildingEfficiency">
+          Building Efficiency (Level 1) - $5,000
+        </button>
+        <button id="upgradeHappinessBoost">
+          Happiness Boost (Level 1) - $5,000
+        </button>
+        <button id="upgradeRoads">Roads (Level 1) - $5,000</button>
+        <button id="upgradeParks">Parks (Level 1) - $5,000</button>
+        <button id="upgradePublicTransport">
+          Public Transport (Level 1) - $5,000
+        </button>
+      </div>
+
+      <div id="buildingInfo">
+        <h3>Building Information</h3>
+        <div class="stat-row">
+          <span>Type:</span>
+          <span id="buildingType">Residential</span>
+        </div>
+        <div class="stat-row">
+          <span>Level:</span>
+          <span id="buildingLevel">1</span>
+        </div>
+        <div class="stat-row">
+          <span>Income:</span>
+          <span id="buildingIncome">$100</span>
+        </div>
+        <button id="upgradeBuildingButton">Upgrade Building <p id="upgradeCostBB">$5,000</p></button>
+        <button id="closeBuildingInfo">Close</button>
+      </div>
+      
+      <div id="notifications"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <script src="TycoonGameJS.js"></script>
+  </body>
+</html>
