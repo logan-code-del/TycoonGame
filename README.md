@@ -11,3 +11,5 @@ To buy buildings, click on the building type you want to build and click on the 
 ** Buildings cannot be placed overlapping **
 
 To buy upgrades you click on the upgrade and it will be purchased.
+
+https://logan-code-del.github.io/TycoonGame/
