@@ -75,7 +75,8 @@ const gameState = {
     a: false,
     s: false,
     d: false,
-  }
+  },
+  vehicles: []
 };
 
 // Building types
@@ -311,6 +312,19 @@ function init() {
   if (openBuildingsBtn) openBuildingsBtn.addEventListener('click', () => { populateBuildingLists(); if (buildingModal) buildingModal.style.display = 'block'; });
   if (closeBuildingModal) closeBuildingModal.addEventListener('click', () => { if (buildingModal) buildingModal.style.display = 'none'; });
 
+  // Enable horizontal scroll with mouse wheel on the build menu
+  const buildMenuEl = document.getElementById('buildMenu');
+  if (buildMenuEl) {
+    buildMenuEl.style.pointerEvents = 'auto';
+    buildMenuEl.addEventListener('wheel', (e) => {
+      // Scroll horizontally
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        buildMenuEl.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }
+    }, { passive: false });
+  }
+
   // Add lights
   addLights();
 
@@ -477,6 +491,9 @@ function animate() {
 
   // Update traffic lights
   updateTrafficLights();
+
+  // Update vehicles (cars on roads)
+  updateVehicles();
 
   // Render scene
   renderer.render(scene, camera);
@@ -686,6 +703,184 @@ function createBus(route) {
   scene.add(busGroup);
 }
 
+// Vehicle system: cars follow roads with linear interpolation and stop at gas stations
+
+function getRoadNetwork() {
+  const roads = [];
+  scene.traverse((obj) => {
+    if (obj && obj._isRoad) roads.push({ pos: obj.position.clone(), obj });
+  });
+  return roads;
+}
+
+function buildRoadPath(startRoad) {
+  const visited = new Set();
+  const queue = [startRoad];
+  const path = [];
+  const roads = getRoadNetwork();
+  
+  while (queue.length > 0 && path.length < 20) {
+    const current = queue.shift();
+    if (visited.has(current)) continue;
+    visited.add(current);
+    path.push(current);
+    
+    roads.forEach((r) => {
+      if (visited.has(r.obj)) return;
+      const dx = Math.abs(r.pos.x - current.position.x);
+      const dz = Math.abs(r.pos.z - current.position.z);
+      if ((dx === 0 && dz > 0 && dz <= 6.5) || (dz === 0 && dx > 0 && dx <= 6.5)) {
+        queue.push(r.obj);
+      }
+    });
+  }
+  return path;
+}
+
+function findNearestGasStation(pos) {
+  let nearest = null;
+  let minDist = Infinity;
+  scene.traverse((obj) => {
+    if (obj.userData && obj.userData.type === 'gasStation') {
+      const d = Math.hypot(obj.userData.x - pos.x, obj.userData.z - pos.z);
+      if (d < minDist && d < 12) {
+        minDist = d;
+        nearest = obj;
+      }
+    }
+  });
+  return nearest;
+}
+
+function spawnCarOnRoad() {
+  const roads = getRoadNetwork();
+  if (roads.length === 0) return null;
+  const startRoad = roads[Math.floor(Math.random() * roads.length)].obj;
+  const path = buildRoadPath(startRoad);
+  if (path.length < 2) return null;
+  
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 0.5, 1.5),
+    new THREE.MeshStandardMaterial({ color: Math.random() < 0.5 ? 0x2222ff : 0xff2222 })
+  );
+  body.position.y = 0.25;
+  body.castShadow = true;
+  car.add(body);
+  
+  // Add simple wheels
+  const wheelGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.3, 8);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  [-0.3, 0.3].forEach(x => {
+    [-0.4, 0.4].forEach(z => {
+      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.15, z);
+      car.add(wheel);
+    });
+  });
+  
+  car.position.set(path[0].position.x, 0.1, path[0].position.z);
+  car.castShadow = true;
+  car.userData = {
+    speed: 0.15 + Math.random() * 0.15,
+    path: path,
+    pathIndex: 0,
+    progress: 0,
+    waitTimer: 0,
+    spawnTime: gameState.gameTime,
+    rotationVelocity: 0
+  };
+  scene.add(car);
+  return car;
+}
+
+function updateVehicles() {
+  if (!gameState.vehicles) gameState.vehicles = [];
+  
+  const MAX_VEHICLES = 6;
+  const DESPAWN_LIFETIME = 180;
+  
+  // Spawn occasional cars
+  if ((gameState.gameTime % 45) < 0.05 && gameState.vehicles.length < MAX_VEHICLES) {
+    const car = spawnCarOnRoad();
+    if (car) gameState.vehicles.push(car);
+  }
+  
+  // Update vehicles
+  for (let i = gameState.vehicles.length - 1; i >= 0; i--) {
+    const car = gameState.vehicles[i];
+    if (!car.userData) {
+      gameState.vehicles.splice(i, 1);
+      scene.remove(car);
+      continue;
+    }
+    
+    // Despawn old vehicles
+    if (gameState.gameTime - car.userData.spawnTime > DESPAWN_LIFETIME) {
+      gameState.vehicles.splice(i, 1);
+      scene.remove(car);
+      continue;
+    }
+    
+    // Wait at gas station
+    if (car.userData.waitTimer > 0) {
+      car.userData.waitTimer--;
+      continue;
+    }
+    
+    const path = car.userData.path;
+    let idx = car.userData.pathIndex;
+    if (!path || idx >= path.length - 1) {
+      const newPath = buildRoadPath(path?.[path.length - 1] || getRoadNetwork()[0]?.obj);
+      if (newPath.length >= 2) {
+        car.userData.path = newPath;
+        car.userData.pathIndex = 0;
+        car.userData.progress = 0;
+      } else {
+        gameState.vehicles.splice(i, 1);
+        scene.remove(car);
+        continue;
+      }
+      idx = 0;
+    }
+    
+    const currentNode = path[idx];
+    const nextNode = path[idx + 1];
+    const startPos = new THREE.Vector3(currentNode.position.x, 0.1, currentNode.position.z);
+    const endPos = new THREE.Vector3(nextNode.position.x, 0.1, nextNode.position.z);
+    const distance = startPos.distanceTo(endPos);
+    
+    car.userData.progress += car.userData.speed / distance;
+    
+    if (car.userData.progress >= 1.0) {
+      car.userData.pathIndex++;
+      car.userData.progress = 0;
+      
+      // Check for gas station at this road node
+      const gasStation = findNearestGasStation(endPos);
+      if (gasStation && Math.random() < 0.4) {
+        car.userData.waitTimer = 60 + Math.floor(Math.random() * 80);
+      }
+    } else {
+      // Linear interpolation along current segment
+      car.position.lerpVectors(startPos, endPos, car.userData.progress);
+      
+      // Smooth turning animation
+      const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+      const angle = Math.atan2(targetDir.x, targetDir.z);
+      const currentAngle = car.rotation.y;
+      
+      let diff = angle - currentAngle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      car.userData.rotationVelocity += diff * 0.1;
+      car.userData.rotationVelocity *= 0.85;
+      car.rotation.y += car.userData.rotationVelocity;
+    }
+  }
+}
+
 // Create a building
 function createBuilding(x, z, type) {
   const buildingGroup = new THREE.Group();
@@ -821,6 +1016,36 @@ function createBuilding(x, z, type) {
     const gsBase = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 5), new THREE.MeshStandardMaterial({ color: buildingTypes.gasStation.color }));
     gsBase.position.y = 0.5;
     buildingGroup.add(gsBase);
+    
+    // Add gas pump stations (visual markers for vehicles to target)
+    for (let i = 0; i < 2; i++) {
+      const pumpGroup = new THREE.Group();
+      pumpGroup.position.x = (i - 0.5) * 1.5;
+      
+      // Pump pole
+      const poleGeom = new THREE.CylinderGeometry(0.15, 0.15, 2, 8);
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0xff6600 });
+      const pole = new THREE.Mesh(poleGeom, poleMat);
+      pole.position.y = 1;
+      pumpGroup.add(pole);
+      
+      // Pump head
+      const headGeom = new THREE.BoxGeometry(0.4, 0.6, 0.3);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
+      const head = new THREE.Mesh(headGeom, headMat);
+      head.position.y = 2;
+      pumpGroup.add(head);
+      
+      // Display screen
+      const screenGeom = new THREE.PlaneGeometry(0.3, 0.4);
+      const screenMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x00ff00, emissiveIntensity: 0.3 });
+      const screen = new THREE.Mesh(screenGeom, screenMat);
+      screen.position.set(0, 1.9, 0.16);
+      pumpGroup.add(screen);
+      
+      buildingGroup.add(pumpGroup);
+    }
+    buildingGroup.userData.isGasStation = true;
   } else if (type === "house") {
     const roof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.5, 4), new THREE.MeshStandardMaterial({ color: buildingTypes.house.color }));
     roof.position.y = 2.5;
