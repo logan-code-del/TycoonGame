@@ -1482,112 +1482,165 @@ function populateResearchTree() {
   if (!tree) return;
   tree.innerHTML = '';
 
-  const items = [
-    { id: 'house', name: 'Advanced Housing', cost: 30, desc: 'Unlock Houses (cheaper, better capacity)' },
-    { id: 'gasStation', name: 'Gas Station', cost: 50, desc: 'Unlock Gas Stations (boost transport)' },
-    { id: 'solar', name: 'Solar Tech', cost: 40, desc: 'Increases happiness and efficiency' },
-    { id: 'skyscraper', name: 'Skyscraper Engineering', cost: 200, desc: 'Unlock Skyscrapers (high income)' },
-    { id: 'transitAI', name: 'Transit AI', cost: 120, desc: 'Improve buses and trains efficiency' },
-    { id: 'hospitalTech', name: 'Healthcare Research', cost: 80, desc: 'Unlock Hospitals (improve population health)' },
-    { id: 'policeTech', name: 'Policing Methods', cost: 60, desc: 'Unlock Police Stations (reduce crime)' },
-    { id: 'education', name: 'Education Reform', cost: 70, desc: 'Unlock Schools (increase population growth)' },
-    { id: 'sports', name: 'Sports & Events', cost: 90, desc: 'Unlock Stadiums (happiness boost, income)' },
-    { id: 'commerce', name: 'Commerce Tech', cost: 100, desc: 'Unlock Malls (commercial income)' },
-    { id: 'industry', name: 'Industrial Automation', cost: 110, desc: 'Unlock Factories (industrial income)' },
-    { id: 'power', name: 'Power Grid', cost: 150, desc: 'Unlock Power Plants (stability, enables airports)' },
-    { id: 'airportTech', name: 'Aviation Tech', cost: 400, desc: 'Unlock Airports (large income)' },
+  // Tech-tree with prerequisites
+  const techs = [
+    // Tier 1 - foundational techs
+    { id: 'basicHousing', name: 'Basic Housing', cost: 20, desc: 'Unlock Houses', prereqs: [], unlock: 'house' },
+    { id: 'transport', name: 'Transport Network', cost: 30, desc: 'Unlock Gas Stations', prereqs: [], unlock: 'gasStation' },
+    { id: 'solar', name: 'Solar Technology', cost: 25, desc: '+1 Happiness tier', prereqs: [], effect: 'happinessBoost' },
+    
+    // Tier 2 - require at least one tier 1
+    { id: 'urbanPlanning', name: 'Urban Planning', cost: 50, desc: 'Unlock Skyscrapers', prereqs: ['basicHousing'], unlock: 'skyscraper' },
+    { id: 'healthcare', name: 'Healthcare Systems', cost: 45, desc: 'Unlock Hospitals', prereqs: ['basicHousing'], unlock: 'hospital' },
+    { id: 'publicSafety', name: 'Public Safety', cost: 40, desc: 'Unlock Police Stations', prereqs: [], unlock: 'police' },
+    { id: 'education', name: 'Education Reform', cost: 50, desc: 'Unlock Schools', prereqs: [], unlock: 'school' },
+    
+    // Tier 3 - commercial and industrial
+    { id: 'commerce', name: 'Commercial Systems', cost: 80, desc: 'Unlock Malls', prereqs: ['urbanPlanning'], unlock: 'mall' },
+    { id: 'industry', name: 'Industrial Tech', cost: 85, desc: 'Unlock Factories', prereqs: ['transport'], unlock: 'factory' },
+    { id: 'sports', name: 'Sports Infrastructure', cost: 70, desc: 'Unlock Stadiums', prereqs: ['education'], unlock: 'stadium' },
+    
+    // Tier 4 - advanced
+    { id: 'powerGrid', name: 'Power Grid Systems', cost: 150, desc: 'Unlock Power Plants', prereqs: ['industry'], unlock: 'powerPlant' },
+    { id: 'advTransit', name: 'Advanced Transit', cost: 100, desc: '+1 Public Transport tier', prereqs: ['transport'], effect: 'publicTransport' },
+    
+    // Tier 5 - endgame
+    { id: 'aviation', name: 'Aviation Technology', cost: 350, desc: 'Unlock Airports', prereqs: ['powerGrid', 'advTransit'], unlock: 'airport' },
   ];
 
-  items.forEach(it => {
-    const card = document.createElement('div');
-    card.style.minWidth = '160px';
-    card.style.padding = '8px';
-    card.style.border = '1px solid #444';
-    card.style.borderRadius = '6px';
-    card.style.background = '#111';
-    card.style.cursor = 'pointer';
-    card.style.flex = '0 0 45%';
-    card.id = `research_${it.id}`;
+  // Helper: check if a tech can be purchased
+  function canAffordTech(tech) {
+    return gameState.researchPoints >= tech.cost;
+  }
 
+  // Helper: check if prerequisites are met
+  function prereqsMet(tech) {
+    return tech.prereqs.length === 0 || tech.prereqs.every(prereq => gameState.researchUnlocked[prereq] === true);
+  }
+
+  // Helper: check if already purchased
+  function alreadyUnlocked(tech) {
+    if (tech.unlock) {
+      return gameState.researchUnlocked[tech.unlock] === true;
+    }
+    if (tech.effect === 'happinessBoost') {
+      return (gameState.upgrades.happinessBoost || 1) > 1;
+    }
+    if (tech.effect === 'publicTransport') {
+      return (gameState.upgrades.publicTransport || 0) > 0;
+    }
+    // Check if we've purchased this specific tech
+    return gameState.researchUnlocked[tech.id] === true;
+  }
+
+  techs.forEach(tech => {
+    const locked = !prereqsMet(tech);
+    const purchased = alreadyUnlocked(tech);
+    const affordable = canAffordTech(tech);
+
+    const card = document.createElement('div');
+    card.style.minWidth = '170px';
+    card.style.padding = '10px';
+    card.style.border = '2px solid #444';
+    card.style.borderRadius = '8px';
+    card.style.background = purchased ? '#1a3a1a' : locked ? '#2a1a1a' : '#111';
+    card.style.cursor = locked || purchased ? 'not-allowed' : 'pointer';
+    card.style.flex = '0 0 45%';
+    card.style.opacity = purchased ? '0.6' : '1';
+    card.id = `research_${tech.id}`;
+
+    // Title
     const title = document.createElement('div');
-    title.style.fontWeight = '600';
-    title.textContent = it.name;
+    title.style.fontWeight = '700';
+    title.style.fontSize = '14px';
+    title.textContent = tech.name;
+    if (purchased) title.textContent += ' ✓';
+    if (locked) title.style.opacity = '0.7';
+
+    // Description
     const desc = document.createElement('div');
     desc.style.fontSize = '12px';
-    desc.style.marginTop = '6px';
-    desc.textContent = it.desc;
-    const cost = document.createElement('div');
-    cost.style.marginTop = '8px';
-    cost.textContent = `Cost: ${it.cost} RP`;
+    desc.style.marginTop = '4px';
+    desc.style.color = locked ? '#888' : '#ccc';
+    desc.textContent = tech.desc;
+
+    // Prerequisites display
+    let prereqText = '';
+    if (tech.prereqs.length > 0) {
+      prereqText = 'Requires: ' + tech.prereqs.map(p => {
+        const met = gameState.researchUnlocked[p] === true;
+        return met ? `✓${p}` : p;
+      }).join(', ');
+    }
+    const prereqDisplay = document.createElement('div');
+    prereqDisplay.style.fontSize = '11px';
+    prereqDisplay.style.marginTop = '4px';
+    prereqDisplay.style.color = '#666';
+    prereqDisplay.textContent = prereqText;
+
+    // Cost
+    const costDiv = document.createElement('div');
+    costDiv.style.marginTop = '8px';
+    costDiv.style.fontWeight = '600';
+    costDiv.style.color = affordable && !locked && !purchased ? '#4caf50' : '#aaa';
+    costDiv.textContent = purchased ? 'PURCHASED' : `Cost: ${tech.cost} RP`;
 
     card.appendChild(title);
     card.appendChild(desc);
-    card.appendChild(cost);
+    if (prereqText) card.appendChild(prereqDisplay);
+    card.appendChild(costDiv);
 
-    // color if affordable
-    if (gameState.researchPoints >= it.cost) {
+    // Highlight affordable items
+    if (affordable && !locked && !purchased) {
       card.style.borderColor = '#4caf50';
-      card.style.boxShadow = '0 0 8px rgba(76,175,80,0.2)';
+      card.style.boxShadow = '0 0 10px rgba(76,175,80,0.3)';
     }
 
+    // Highlight locked items
+    if (locked) {
+      card.style.borderColor = '#666';
+      card.style.opacity = '0.5';
+    }
+
+    // Purchase handler
     card.addEventListener('click', () => {
-      if (gameState.researchPoints >= it.cost) {
-        gameState.researchPoints -= it.cost;
-        // apply unlocks
-        switch (it.id) {
-          case 'house':
-            gameState.researchUnlocked.house = true;
-            break;
-          case 'gasStation':
-            gameState.researchUnlocked.gasStation = true;
-            break;
-          case 'skyscraper':
-            gameState.researchUnlocked.skyscraper = true;
-            break;
-          case 'transitAI':
-            gameState.upgrades.publicTransport = Math.min(3, (gameState.upgrades.publicTransport || 0) + 1);
-            break;
-          case 'solar':
-            gameState.upgrades.happinessBoost = Math.min(3, (gameState.upgrades.happinessBoost || 1) + 1);
-            break;
-          case 'hospitalTech':
-            gameState.researchUnlocked.hospital = true;
-            break;
-          case 'policeTech':
-            gameState.researchUnlocked.police = true;
-            break;
-          case 'education':
-            gameState.researchUnlocked.school = true;
-            break;
-          case 'sports':
-            gameState.researchUnlocked.stadium = true;
-            break;
-          case 'commerce':
-            gameState.researchUnlocked.mall = true;
-            break;
-          case 'industry':
-            gameState.researchUnlocked.factory = true;
-            break;
-          case 'power':
-            gameState.researchUnlocked.powerPlant = true;
-            break;
-          case 'airportTech':
-            gameState.researchUnlocked.airport = true;
-            break;
-          default:
-            break;
-        }
-        updateResearchDisplay();
-        populateResearchTree();
-        persistGameState();
-        showNotification(`Purchased research: ${it.name}`);
-      } else {
-        showNotification('Not enough research points');
+      if (purchased) {
+        showNotification('Already purchased');
+        return;
       }
+      if (locked) {
+        showNotification('Prerequisites not met');
+        return;
+      }
+      if (!canAffordTech(tech)) {
+        showNotification('Not enough research points');
+        return;
+      }
+
+      // Purchase the tech
+      gameState.researchPoints -= tech.cost;
+      
+      // Mark as purchased
+      if (tech.unlock) {
+        gameState.researchUnlocked[tech.unlock] = true;
+      }
+      if (tech.effect === 'happinessBoost') {
+        gameState.upgrades.happinessBoost = Math.min(3, (gameState.upgrades.happinessBoost || 1) + 1);
+      }
+      if (tech.effect === 'publicTransport') {
+        gameState.upgrades.publicTransport = Math.min(3, (gameState.upgrades.publicTransport || 0) + 1);
+      }
+      gameState.researchUnlocked[tech.id] = true;
+
+      updateResearchDisplay();
+      populateResearchTree();
+      persistGameState();
+      showNotification(`Researched: ${tech.name}`);
     });
 
     tree.appendChild(card);
   });
+
   const modalPoints = document.getElementById('researchPointsModal');
   if (modalPoints) modalPoints.textContent = gameState.researchPoints.toLocaleString();
 }
@@ -2294,6 +2347,23 @@ function onMouseClick(event) {
                     }
                 } else {
                     showNotification(`Not enough money to build park (cost: $${parkCost.toLocaleString()})`);
+                }
+            } else {
+                // Generic handler for all other building types (house, gasStation, researchCenter, hospital, police, school, stadium, mall, factory, powerPlant, airport)
+                const buildingCost = buildingTypes[gameState.buildMode].cost(1);
+                
+                if (gameState.money >= buildingCost) {
+                    gameState.money -= buildingCost;
+                    updateMoneyDisplay();
+                    
+                    const newBuilding = createBuilding(x, z, gameState.buildMode);
+                    newBuilding.userData.level = 1;
+                    newBuilding.userData.x = x;
+                    newBuilding.userData.z = z;
+                    
+                    showNotification(`Built ${gameState.buildMode} for $${buildingCost.toLocaleString()}`);
+                } else {
+                    showNotification(`Not enough money to build ${gameState.buildMode} (cost: $${buildingCost.toLocaleString()})`);
                 }
             }
         }
