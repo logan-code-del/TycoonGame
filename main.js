@@ -14,11 +14,11 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(20, 20, 20);
 camera.lookAt(0, 0, 0);
 
-// Initialize renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Initialize renderer using existing canvas in the HTML
+const canvas = document.getElementById("gameCanvas");
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
 
 // Add orbit controls
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -29,6 +29,17 @@ controls.minDistance = 10;
 controls.maxDistance = 300; // Allow zooming out further
 controls.maxPolarAngle = Math.PI / 2.1; // Prevent going below ground
 controls.autoRotate = false;
+
+// Allow right-click rotate and middle mouse zoom by remapping mouse buttons
+controls.mouseButtons = {
+  LEFT: THREE.MOUSE.ROTATE,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT: THREE.MOUSE.ROTATE,
+};
+
+controls.enableZoom = true;
+controls.zoomSpeed = 1.2;
+controls.panSpeed = 1.0;
 
 // Game state
 const gameState = {
@@ -52,6 +63,13 @@ const gameState = {
     parks: 1,
     publicTransport: 0,
   },
+  researchPoints: 0,
+  researchUnlocked: {
+    gasStation: false,
+    house: false,
+    skyscraper: false,
+  },
+  lastResearchUpdate: 0,
   cameraKeys: {
     w: false,
     a: false,
@@ -85,6 +103,24 @@ const buildingTypes = {
     cost: (level) => 2000, // Fixed cost for parks
     color: 0x33aa33,
   },
+  researchCenter: {
+    cost: (level) => 3000,
+    color: 0x7744ff,
+  },
+  gasStation: {
+    cost: (level) => 1500,
+    color: 0x4444aa,
+  },
+  house: {
+    cost: (level) => 1200,
+    income: 60,
+    color: 0x77dd88,
+  },
+  skyscraper: {
+    cost: (level) => 20000,
+    income: 1000,
+    color: 0x9999ff,
+  },
 };
 // Initialize game
 init();
@@ -97,7 +133,7 @@ function init() {
 
   // Add event listeners
   window.addEventListener("resize", onWindowResize);
-  renderer.domElement = document.getElementById("gameCanvas");
+  // Attach click handler to renderer's canvas
   renderer.domElement.addEventListener("click", function (e) {
     onMouseClick(e);
   });
@@ -118,6 +154,18 @@ function init() {
   document
     .getElementById("buildPark")
     .addEventListener("click", () => setBuildMode("park"));
+  document
+    .getElementById("buildResearchCenter")
+    .addEventListener("click", () => setBuildMode("researchCenter"));
+  document
+    .getElementById("buildGasStation")
+    .addEventListener("click", () => setBuildMode("gasStation"));
+  document
+    .getElementById("buildHouse")
+    .addEventListener("click", () => setBuildMode("house"));
+  document
+    .getElementById("buildSkyscraper")
+    .addEventListener("click", () => setBuildMode("skyscraper"));
   document
     .getElementById("cancelBuild")
     .addEventListener("click", cancelBuildMode);
@@ -151,6 +199,15 @@ function init() {
   window.addEventListener("keydown", handleKeyPress);
   window.addEventListener("keyup", handleKeyUp);
 
+  // Research panel actions
+  const researchGasBtn = document.getElementById("researchUnlockGas");
+  const researchHouseBtn = document.getElementById("researchUnlockHouse");
+  const researchSkyscraperBtn = document.getElementById("researchUnlockSkyscraper");
+
+  if (researchGasBtn) researchGasBtn.addEventListener("click", () => unlockResearch("gasStation", 50));
+  if (researchHouseBtn) researchHouseBtn.addEventListener("click", () => unlockResearch("house", 30));
+  if (researchSkyscraperBtn) researchSkyscraperBtn.addEventListener("click", () => unlockResearch("skyscraper", 200));
+
   // Add lights
   addLights();
 
@@ -162,6 +219,7 @@ function init() {
   updatePopulationDisplay();
   updateHappinessDisplay();
   updateUpgradeButtons();
+  updateResearchDisplay();
 
   // Add metro station if public transport is upgraded
   if (gameState.upgrades.publicTransport > 0) {
@@ -204,6 +262,11 @@ function handleKeyPress(event) {
   if (key === 'a') gameState.cameraKeys.a = true;
   if (key === 's') gameState.cameraKeys.s = true;
   if (key === 'd') gameState.cameraKeys.d = true;
+  // Arrow keys for rotation
+  if (key === 'arrowleft') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.left = true;
+  if (key === 'arrowright') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.right = true;
+  if (key === 'arrowup') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.up = true;
+  if (key === 'arrowdown') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.down = true;
 }
 
 //handle key releases
@@ -213,6 +276,10 @@ function handleKeyUp(event) {
   if (key === 'a') gameState.cameraKeys.a = false;
   if (key === 's') gameState.cameraKeys.s = false;
   if (key === 'd') gameState.cameraKeys.d = false;
+  if (key === 'arrowleft') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.left = false;
+  if (key === 'arrowright') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.right = false;
+  if (key === 'arrowup') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.up = false;
+  if (key === 'arrowdown') gameState.cameraRotate = gameState.cameraRotate || {}, gameState.cameraRotate.down = false;
 }
 
 // Handle window resize
@@ -244,6 +311,21 @@ function animate() {
     controls.target.x += cameraSpeed;
   }
 
+  // Handle arrow key camera rotation
+  const rotateSpeed = 0.02;
+  if (gameState.cameraRotate && gameState.cameraRotate.left) {
+    controls.rotateLeft(rotateSpeed);
+  }
+  if (gameState.cameraRotate && gameState.cameraRotate.right) {
+    controls.rotateLeft(-rotateSpeed);
+  }
+  if (gameState.cameraRotate && gameState.cameraRotate.up) {
+    controls.rotateUp(rotateSpeed);
+  }
+  if (gameState.cameraRotate && gameState.cameraRotate.down) {
+    controls.rotateUp(-rotateSpeed);
+  }
+
   // Update game time
   gameState.gameTime += 1 / 30; // Assuming 30 FPS
 
@@ -263,6 +345,12 @@ function animate() {
   if (gameState.gameTime - gameState.lastPopulationUpdate >= 45) {
     updatePopulation();
     gameState.lastPopulationUpdate = gameState.gameTime;
+  }
+
+  // Update research every 30 seconds
+  if (gameState.gameTime - gameState.lastResearchUpdate >= 30) {
+    updateResearch();
+    gameState.lastResearchUpdate = gameState.gameTime;
   }
 
   // Update day/night cycle
@@ -493,6 +581,10 @@ function createBuilding(x, z, type) {
     isBuilding: true,
   };
 
+  // Store coordinates in building data for distance checks (important for parks/roads/transport)
+  buildingGroup.userData.x = x;
+  buildingGroup.userData.z = z;
+
   // Create base
   const height = type === "industrial" ? 3 : type === "commercial" ? 5 : 4;
   const baseGeometry = new THREE.BoxGeometry(5, height, 5);
@@ -593,6 +685,40 @@ function createBuilding(x, z, type) {
     buildingGroup.add(door);
   }
 
+  else if (type === "researchCenter") {
+    // Simple research center look
+    const labGeometry = new THREE.BoxGeometry(6, 2, 6);
+    const labMaterial = new THREE.MeshStandardMaterial({ color: buildingTypes.researchCenter.color });
+    const lab = new THREE.Mesh(labGeometry, labMaterial);
+    lab.position.y = 1;
+    buildingGroup.add(lab);
+
+    // Antenna
+    const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 3, 8);
+    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+    pole.position.set(2, 2.5, 0);
+    buildingGroup.add(pole);
+
+    buildingGroup.userData.isResearchCenter = true;
+  } else if (type === "gasStation") {
+    const gsBase = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 5), new THREE.MeshStandardMaterial({ color: buildingTypes.gasStation.color }));
+    gsBase.position.y = 0.5;
+    buildingGroup.add(gsBase);
+  } else if (type === "house") {
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.5, 4), new THREE.MeshStandardMaterial({ color: buildingTypes.house.color }));
+    roof.position.y = 2.5;
+    buildingGroup.add(roof);
+  } else if (type === "skyscraper") {
+    const skGeo = new THREE.BoxGeometry(6, 20, 6);
+    const skMat = new THREE.MeshStandardMaterial({ color: buildingTypes.skyscraper.color });
+    const sk = new THREE.Mesh(skGeo, skMat);
+    sk.position.y = 10;
+    buildingGroup.add(sk);
+    buildingGroup.userData.level = 1;
+    buildingGroup.userData.income = buildingTypes.skyscraper.income;
+  }
+
   scene.add(buildingGroup);
 
   // Add building to game state
@@ -682,6 +808,9 @@ function createMetroStation(x, z, isCentral = false) {
   const stationGroup = new THREE.Group();
   stationGroup.position.set(x, 0, z);
   stationGroup._isMetroStation = true;
+  stationGroup.userData = stationGroup.userData || {};
+  stationGroup.userData.x = x;
+  stationGroup.userData.z = z;
 
   // Create station base
   const baseGeometry = new THREE.BoxGeometry(8, 1, 8);
@@ -1124,6 +1253,36 @@ function updateMoneyDisplay() {
   ).textContent = `$${gameState.money.toLocaleString()}`;
 }
 
+function updateResearchDisplay() {
+  const el = document.getElementById("researchPoints");
+  const panel = document.getElementById("researchPointsPanel");
+  if (el) el.textContent = gameState.researchPoints.toLocaleString();
+  if (panel) panel.textContent = gameState.researchPoints.toLocaleString();
+  // Update research unlock buttons enabled state
+  const gasBtn = document.getElementById("researchUnlockGas");
+  const houseBtn = document.getElementById("researchUnlockHouse");
+  const skyBtn = document.getElementById("researchUnlockSkyscraper");
+  if (gasBtn) gasBtn.disabled = gameState.researchPoints < 50 || gameState.researchUnlocked.gasStation;
+  if (houseBtn) houseBtn.disabled = gameState.researchPoints < 30 || gameState.researchUnlocked.house;
+  if (skyBtn) skyBtn.disabled = gameState.researchPoints < 200 || gameState.researchUnlocked.skyscraper;
+  // Update build menu lock states
+  const buildGas = document.getElementById("buildGasStation");
+  const buildHouse = document.getElementById("buildHouse");
+  const buildSky = document.getElementById("buildSkyscraper");
+  if (buildGas) {
+    buildGas.disabled = !gameState.researchUnlocked.gasStation;
+    buildGas.textContent = gameState.researchUnlocked.gasStation ? "Gas Station ($1,500)" : "Gas Station (Locked)";
+  }
+  if (buildHouse) {
+    buildHouse.disabled = !gameState.researchUnlocked.house;
+    buildHouse.textContent = gameState.researchUnlocked.house ? "House ($1,200)" : "House (Locked)";
+  }
+  if (buildSky) {
+    buildSky.disabled = !gameState.researchUnlocked.skyscraper;
+    buildSky.textContent = gameState.researchUnlocked.skyscraper ? "Skyscraper ($20,000)" : "Skyscraper (Locked)";
+  }
+}
+
 function updatePopulationDisplay() {
   document.getElementById("population").textContent =
     gameState.population.toLocaleString();
@@ -1426,6 +1585,35 @@ function updatePopulation() {
 
   // Update UI
   updatePopulationDisplay();
+}
+
+// Update research points generated by research centers
+function updateResearch() {
+  // Count research centers
+  let centers = 0;
+  scene.traverse((object) => {
+    if (object.userData && object.userData.type === "researchCenter") centers++;
+  });
+
+  if (centers <= 0) return;
+
+  // Each center generates 10 RP per interval, scale with upgrades
+  const perCenter = 10;
+  const gained = centers * perCenter;
+  gameState.researchPoints += gained;
+  updateResearchDisplay();
+  showNotification(`Generated ${gained} research points from ${centers} research center(s)`);
+}
+
+function unlockResearch(key, cost) {
+  if (gameState.researchPoints >= cost) {
+    gameState.researchPoints -= cost;
+    gameState.researchUnlocked[key] = true;
+    updateResearchDisplay();
+    showNotification(`Unlocked ${capitalizeFirstLetter(key)}`);
+  } else {
+    showNotification("Not enough research points");
+  }
 }
 
 // Update building animations
