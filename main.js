@@ -693,7 +693,7 @@ function createBuilding(x, z, type) {
   buildingGroup.userData = {
     type: type,
     level: 1,
-    income: buildingTypes[type].income,
+    income: Number(buildingTypes[type].income) || 0,
     isBuilding: true,
   };
 
@@ -905,7 +905,7 @@ function createBuilding(x, z, type) {
 }
 // Update building income based on surroundings and level
 function updateBuildingIncome(buildingData) {
-  const baseIncome = buildingTypes[buildingData.type].income;
+  const baseIncome = Number(buildingTypes[buildingData.type].income) || 0;
   const level = buildingData.level || 1;
 
   // Level multiplier
@@ -1876,7 +1876,7 @@ function collectTaxes() {
 
   // Collect from each building
   gameState.buildings.forEach((building) => {
-    totalIncome += building.income;
+    totalIncome += Number(building.income) || 0;
   });
 
   // Apply tax collection upgrade
@@ -1899,9 +1899,8 @@ function updateHappiness() {
   let targetHappiness = 50; // Base happiness
 
   // Population density factor
-  const populationDensity =
-    gameState.population /
-    gameState.buildings.filter((b) => b.type === "residential").length;
+  const residentialCount = gameState.buildings.filter((b) => b.type === "residential").length || 0;
+  const populationDensity = residentialCount > 0 ? gameState.population / residentialCount : 0;
   if (populationDensity > 100) {
     targetHappiness -= 10; // Overcrowding penalty
   } else if (populationDensity < 50) {

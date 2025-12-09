@@ -191,7 +191,7 @@
       </div>
     </div>
     <!-- Building catalog modal -->
-    <div id="buildingModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 640px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+    <div id="buildingModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 640px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000; pointer-events: auto;">
       <h3>City Buildings</h3>
       <div style="display:flex; gap:12px;">
         <div style="flex:1;">
@@ -234,7 +234,7 @@
         </div>
       </div>
 
-      <div id="buildMenu">
+      <div id="buildMenu" style="overflow-x:auto; white-space:nowrap; max-width:90%;">
         <button id="buildResidential" class="build-button">Residential</button>
         <button id="buildCommercial" class="build-button">Commercial</button>
         <button id="buildIndustrial" class="build-button">Industrial</button>
@@ -278,9 +278,9 @@
 
       <!-- Research dialog is opened via the Research button in the upgrade menu -->
       <!-- Modal dialog for research tree -->
-      <div id="researchModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 540px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+      <div id="researchModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 540px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000; pointer-events: auto;">
         <h2>Research Tree</h2>
-        <div id="researchTree" style="display:flex; gap:12px; flex-wrap:wrap;">
+        <div id="researchTree" style="display:flex; gap:12px; flex-wrap:wrap; max-height:320px; overflow:auto; padding-right:8px;">
           <!-- items populated dynamically -->
         </div>
         <div style="margin-top:12px; display:flex; justify-content:space-between;">
@@ -315,7 +315,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
     <!-- Settings modal -->
-    <div id="settingsModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 420px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+    <div id="settingsModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 420px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000; pointer-events: auto;">
       <h3>Settings</h3>
       <div style="margin-bottom:8px;">Camera Move Speed: <input id="settingMoveSpeed" type="range" min="0.1" max="2" step="0.1" value="0.5"></div>
       <div style="margin-bottom:8px;">Camera Rotate Speed: <input id="settingRotateSpeed" type="range" min="0.005" max="0.2" step="0.005" value="0.02"></div>
