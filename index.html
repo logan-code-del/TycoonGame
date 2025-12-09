@@ -190,6 +190,25 @@
         <p>Building your city...</p>
       </div>
     </div>
+    <!-- Building catalog modal -->
+    <div id="buildingModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 640px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+      <h3>City Buildings</h3>
+      <div style="display:flex; gap:12px;">
+        <div style="flex:1;">
+          <h4>Recreational</h4>
+          <div id="buildListRecreational" style="max-height:220px; overflow:auto;"></div>
+        </div>
+        <div style="flex:1;">
+          <h4>Residential</h4>
+          <div id="buildListResidential" style="max-height:220px; overflow:auto;"></div>
+        </div>
+        <div style="flex:1;">
+          <h4>Industrial/Commercial</h4>
+          <div id="buildListIndustrial" style="max-height:220px; overflow:auto;"></div>
+        </div>
+      </div>
+      <div style="margin-top:12px; display:flex; justify-content:flex-end;"><button id="closeBuildingModal">Close</button></div>
+    </div>
     <canvas id="gameCanvas"></canvas>
 
     <div id="ui">
@@ -225,6 +244,14 @@
         <button id="buildGasStation" class="build-button" disabled>Gas Station (Locked)</button>
         <button id="buildHouse" class="build-button" disabled>House (Locked)</button>
         <button id="buildSkyscraper" class="build-button" disabled>Skyscraper (Locked)</button>
+        <button id="buildHospital" class="build-button" disabled>Hospital (Locked)</button>
+        <button id="buildPolice" class="build-button" disabled>Police Station (Locked)</button>
+        <button id="buildSchool" class="build-button" disabled>School (Locked)</button>
+        <button id="buildStadium" class="build-button" disabled>Stadium (Locked)</button>
+        <button id="buildMall" class="build-button" disabled>Mall (Locked)</button>
+        <button id="buildFactory" class="build-button" disabled>Factory (Locked)</button>
+        <button id="buildPowerPlant" class="build-button" disabled>Power Plant (Locked)</button>
+        <button id="buildAirport" class="build-button" disabled>Airport (Locked)</button>
         <button id="cancelBuild">Cancel</button>
     </div>
     
@@ -244,17 +271,24 @@
         <button id="upgradePublicTransport">
           Public Transport (Level 1) - $5,000
         </button>
+        <button id="openResearch" style="margin-top:8px; display:block;">Research</button>
+        <button id="openSettings" style="margin-top:8px; display:block;">Settings</button>
+        <button id="openBuildings" style="margin-top:8px; display:block;">Buildings</button>
       </div>
 
-      <div id="researchPanel" style="position: absolute; top: 200px; right: 10px; background-color: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; width: 220px;">
-        <h3>Research</h3>
-        <div class="stat-row">
-          <span>Points:</span>
-          <span id="researchPointsPanel">0</span>
+      <!-- Research dialog is opened via the Research button in the upgrade menu -->
+      <!-- Modal dialog for research tree -->
+      <div id="researchModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 540px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+        <h2>Research Tree</h2>
+        <div id="researchTree" style="display:flex; gap:12px; flex-wrap:wrap;">
+          <!-- items populated dynamically -->
         </div>
-        <button id="researchUnlockGas" disabled>Unlock Gas Station (50 RP)</button>
-        <button id="researchUnlockHouse" disabled>Unlock House (30 RP)</button>
-        <button id="researchUnlockSkyscraper" disabled>Unlock Skyscraper (200 RP)</button>
+        <div style="margin-top:12px; display:flex; justify-content:space-between;">
+          <div>Points: <span id="researchPointsModal">0</span></div>
+          <div>
+            <button id="closeResearchModal">Close</button>
+          </div>
+        </div>
       </div>
 
       <div id="buildingInfo">
@@ -280,6 +314,14 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <!-- Settings modal -->
+    <div id="settingsModal" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 420px; max-width: 95%; background: rgba(10,10,10,0.95); color: white; padding: 16px; border-radius: 8px; z-index: 2000;">
+      <h3>Settings</h3>
+      <div style="margin-bottom:8px;">Camera Move Speed: <input id="settingMoveSpeed" type="range" min="0.1" max="2" step="0.1" value="0.5"></div>
+      <div style="margin-bottom:8px;">Camera Rotate Speed: <input id="settingRotateSpeed" type="range" min="0.005" max="0.2" step="0.005" value="0.02"></div>
+      <div style="margin-bottom:8px;">Zoom Speed: <input id="settingZoomSpeed" type="range" min="0.2" max="3" step="0.1" value="1.2"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;"><button id="closeSettings">Close</button></div>
+    </div>
     <script src="main.js"></script>
   </body>
 </html>

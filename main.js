@@ -121,6 +121,46 @@ const buildingTypes = {
     income: 1000,
     color: 0x9999ff,
   },
+  hospital: {
+    cost: (level) => 8000,
+    income: 0,
+    color: 0xff9999,
+  },
+  police: {
+    cost: (level) => 4000,
+    income: 0,
+    color: 0x999999,
+  },
+  school: {
+    cost: (level) => 5000,
+    income: 0,
+    color: 0x99ccff,
+  },
+  stadium: {
+    cost: (level) => 15000,
+    income: 200,
+    color: 0xffcc99,
+  },
+  mall: {
+    cost: (level) => 12000,
+    income: 300,
+    color: 0xffdd66,
+  },
+  factory: {
+    cost: (level) => 7000,
+    income: 250,
+    color: 0x996633,
+  },
+  powerPlant: {
+    cost: (level) => 25000,
+    income: 0,
+    color: 0x3333aa,
+  },
+  airport: {
+    cost: (level) => 40000,
+    income: 1000,
+    color: 0x66aaff,
+  },
 };
 // Initialize game
 init();
@@ -167,6 +207,30 @@ function init() {
     .getElementById("buildSkyscraper")
     .addEventListener("click", () => setBuildMode("skyscraper"));
   document
+    .getElementById("buildHospital")
+    .addEventListener("click", () => setBuildMode("hospital"));
+  document
+    .getElementById("buildPolice")
+    .addEventListener("click", () => setBuildMode("police"));
+  document
+    .getElementById("buildSchool")
+    .addEventListener("click", () => setBuildMode("school"));
+  document
+    .getElementById("buildStadium")
+    .addEventListener("click", () => setBuildMode("stadium"));
+  document
+    .getElementById("buildMall")
+    .addEventListener("click", () => setBuildMode("mall"));
+  document
+    .getElementById("buildFactory")
+    .addEventListener("click", () => setBuildMode("factory"));
+  document
+    .getElementById("buildPowerPlant")
+    .addEventListener("click", () => setBuildMode("powerPlant"));
+  document
+    .getElementById("buildAirport")
+    .addEventListener("click", () => setBuildMode("airport"));
+  document
     .getElementById("cancelBuild")
     .addEventListener("click", cancelBuildMode);
 
@@ -207,12 +271,54 @@ function init() {
   if (researchGasBtn) researchGasBtn.addEventListener("click", () => unlockResearch("gasStation", 50));
   if (researchHouseBtn) researchHouseBtn.addEventListener("click", () => unlockResearch("house", 30));
   if (researchSkyscraperBtn) researchSkyscraperBtn.addEventListener("click", () => unlockResearch("skyscraper", 200));
+  
+  // Research modal open/close
+  const openResearchBtn = document.getElementById("openResearch");
+  const researchModal = document.getElementById("researchModal");
+  const closeResearchModal = document.getElementById("closeResearchModal");
+  if (openResearchBtn) openResearchBtn.addEventListener("click", () => {
+    populateResearchTree();
+    if (researchModal) researchModal.style.display = 'block';
+  });
+  if (closeResearchModal) closeResearchModal.addEventListener("click", () => {
+    if (researchModal) researchModal.style.display = 'none';
+  });
+
+  // Settings modal wiring
+  const openSettingsBtn = document.getElementById('openSettings');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsBtn = document.getElementById('closeSettings');
+  const moveInput = document.getElementById('settingMoveSpeed');
+  const rotateInput = document.getElementById('settingRotateSpeed');
+  const zoomInput = document.getElementById('settingZoomSpeed');
+  if (!gameState.settings) gameState.settings = { moveSpeed: 0.5, rotateSpeed: 0.02, zoomSpeed: 1.2 };
+  // initialize inputs
+  if (moveInput) moveInput.value = gameState.settings.moveSpeed;
+  if (rotateInput) rotateInput.value = gameState.settings.rotateSpeed;
+  if (zoomInput) zoomInput.value = gameState.settings.zoomSpeed;
+
+  if (openSettingsBtn) openSettingsBtn.addEventListener('click', () => { if (settingsModal) settingsModal.style.display = 'block'; });
+  if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => { if (settingsModal) settingsModal.style.display = 'none'; persistGameState(); });
+
+  if (moveInput) moveInput.addEventListener('input', (e) => { gameState.settings.moveSpeed = parseFloat(e.target.value); persistGameState(); });
+  if (rotateInput) rotateInput.addEventListener('input', (e) => { gameState.settings.rotateSpeed = parseFloat(e.target.value); persistGameState(); });
+  if (zoomInput) zoomInput.addEventListener('input', (e) => { gameState.settings.zoomSpeed = parseFloat(e.target.value); controls.zoomSpeed = gameState.settings.zoomSpeed; persistGameState(); });
+
+  // Buildings modal wiring
+  const openBuildingsBtn = document.getElementById('openBuildings');
+  const buildingModal = document.getElementById('buildingModal');
+  const closeBuildingModal = document.getElementById('closeBuildingModal');
+  if (openBuildingsBtn) openBuildingsBtn.addEventListener('click', () => { populateBuildingLists(); if (buildingModal) buildingModal.style.display = 'block'; });
+  if (closeBuildingModal) closeBuildingModal.addEventListener('click', () => { if (buildingModal) buildingModal.style.display = 'none'; });
 
   // Add lights
   addLights();
 
   // Add initial terrain
   addInitialTerrain();
+
+  // Load saved settings/state
+  loadGameState();
 
   // Update UI
   updateMoneyDisplay();
@@ -297,7 +403,7 @@ function animate() {
   controls.update();
 
   // Handle WASD camera movement
-  const cameraSpeed = 0.5;
+  const cameraSpeed = gameState.settings?.moveSpeed || 0.5;
   if (gameState.cameraKeys.w) {
     controls.target.z -= cameraSpeed;
   }
@@ -311,19 +417,29 @@ function animate() {
     controls.target.x += cameraSpeed;
   }
 
-  // Handle arrow key camera rotation
-  const rotateSpeed = 0.02;
-  if (gameState.cameraRotate && gameState.cameraRotate.left) {
-    controls.rotateLeft(rotateSpeed);
-  }
-  if (gameState.cameraRotate && gameState.cameraRotate.right) {
-    controls.rotateLeft(-rotateSpeed);
-  }
-  if (gameState.cameraRotate && gameState.cameraRotate.up) {
-    controls.rotateUp(rotateSpeed);
-  }
-  if (gameState.cameraRotate && gameState.cameraRotate.down) {
-    controls.rotateUp(-rotateSpeed);
+  // Handle arrow key camera rotation (use spherical math instead of OrbitControls helpers)
+  const rotateSpeed = gameState.settings?.rotateSpeed || 0.02;
+  if (gameState.cameraRotate && (gameState.cameraRotate.left || gameState.cameraRotate.right || gameState.cameraRotate.up || gameState.cameraRotate.down)) {
+    // rotate camera around controls.target using spherical coordinates
+    const offset = new THREE.Vector3();
+    offset.copy(camera.position).sub(controls.target);
+
+    const spherical = new THREE.Spherical();
+    spherical.setFromVector3(offset);
+
+    if (gameState.cameraRotate.left) spherical.theta += rotateSpeed;
+    if (gameState.cameraRotate.right) spherical.theta -= rotateSpeed;
+    if (gameState.cameraRotate.up) spherical.phi -= rotateSpeed;
+    if (gameState.cameraRotate.down) spherical.phi += rotateSpeed;
+
+    // limit phi
+    const EPS = 0.000001;
+    spherical.phi = Math.max(EPS, Math.min(Math.PI - EPS, spherical.phi));
+
+    offset.setFromSpherical(spherical);
+    camera.position.copy(controls.target).add(offset);
+    camera.lookAt(controls.target);
+    controls.update();
   }
 
   // Update game time
@@ -717,6 +833,67 @@ function createBuilding(x, z, type) {
     buildingGroup.add(sk);
     buildingGroup.userData.level = 1;
     buildingGroup.userData.income = buildingTypes.skyscraper.income;
+  } else if (type === 'hospital') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 6), new THREE.MeshStandardMaterial({ color: buildingTypes.hospital.color }));
+    base.position.y = 1.5;
+    buildingGroup.add(base);
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 1.2), new THREE.MeshStandardMaterial({ color: 0xff0000 }));
+    cross.position.set(0, 2.2, 0);
+    buildingGroup.add(cross);
+    buildingGroup.userData.income = buildingTypes.hospital.income;
+  } else if (type === 'police') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(5, 2.5, 5), new THREE.MeshStandardMaterial({ color: buildingTypes.police.color }));
+    base.position.y = 1.25;
+    buildingGroup.add(base);
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1, 0.5), new THREE.MeshStandardMaterial({ color: 0x2222ff }));
+    flag.position.set(2, 2, 0);
+    buildingGroup.add(flag);
+    buildingGroup.userData.income = buildingTypes.police.income;
+  } else if (type === 'school') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(5, 2, 5), new THREE.MeshStandardMaterial({ color: buildingTypes.school.color }));
+    base.position.y = 1;
+    buildingGroup.add(base);
+    const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0xffff00 }));
+    bell.position.set(0, 2, 0);
+    buildingGroup.add(bell);
+    buildingGroup.userData.income = buildingTypes.school.income;
+  } else if (type === 'stadium') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(8, 2, 8), new THREE.MeshStandardMaterial({ color: buildingTypes.stadium.color }));
+    base.position.y = 1;
+    buildingGroup.add(base);
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+    roof.position.y = 2;
+    buildingGroup.add(roof);
+    buildingGroup.userData.income = buildingTypes.stadium.income;
+  } else if (type === 'mall') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(7, 3, 7), new THREE.MeshStandardMaterial({ color: buildingTypes.mall.color }));
+    base.position.y = 1.5;
+    buildingGroup.add(base);
+    buildingGroup.userData.income = buildingTypes.mall.income;
+  } else if (type === 'factory') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 6), new THREE.MeshStandardMaterial({ color: buildingTypes.factory.color }));
+    base.position.y = 1.5;
+    buildingGroup.add(base);
+    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 3, 8), new THREE.MeshStandardMaterial({ color: 0x553322 }));
+    stack.position.set(1.5, 3, 1.5);
+    buildingGroup.add(stack);
+    buildingGroup.userData.income = buildingTypes.factory.income;
+  } else if (type === 'powerPlant') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(8, 3, 8), new THREE.MeshStandardMaterial({ color: buildingTypes.powerPlant.color }));
+    base.position.y = 1.5;
+    buildingGroup.add(base);
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1, 6, 8), new THREE.MeshStandardMaterial({ color: 0x666666 }));
+    tower.position.set(2, 4, 0);
+    buildingGroup.add(tower);
+    buildingGroup.userData.income = buildingTypes.powerPlant.income;
+  } else if (type === 'airport') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(12, 2, 12), new THREE.MeshStandardMaterial({ color: buildingTypes.airport.color }));
+    base.position.y = 1;
+    buildingGroup.add(base);
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(1, 6, 1), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    tower.position.set(4, 4, 4);
+    buildingGroup.add(tower);
+    buildingGroup.userData.income = buildingTypes.airport.income;
   }
 
   scene.add(buildingGroup);
@@ -1281,6 +1458,174 @@ function updateResearchDisplay() {
     buildSky.disabled = !gameState.researchUnlocked.skyscraper;
     buildSky.textContent = gameState.researchUnlocked.skyscraper ? "Skyscraper ($20,000)" : "Skyscraper (Locked)";
   }
+  const buildHospital = document.getElementById('buildHospital');
+  const buildPolice = document.getElementById('buildPolice');
+  const buildSchool = document.getElementById('buildSchool');
+  const buildStadium = document.getElementById('buildStadium');
+  const buildMall = document.getElementById('buildMall');
+  const buildFactory = document.getElementById('buildFactory');
+  const buildPower = document.getElementById('buildPowerPlant');
+  const buildAirportEl = document.getElementById('buildAirport');
+  if (buildHospital) { buildHospital.disabled = !gameState.researchUnlocked.hospital; buildHospital.textContent = gameState.researchUnlocked.hospital ? 'Hospital ($8,000)' : 'Hospital (Locked)'; }
+  if (buildPolice) { buildPolice.disabled = !gameState.researchUnlocked.police; buildPolice.textContent = gameState.researchUnlocked.police ? 'Police Station ($4,000)' : 'Police Station (Locked)'; }
+  if (buildSchool) { buildSchool.disabled = !gameState.researchUnlocked.school; buildSchool.textContent = gameState.researchUnlocked.school ? 'School ($5,000)' : 'School (Locked)'; }
+  if (buildStadium) { buildStadium.disabled = !gameState.researchUnlocked.stadium; buildStadium.textContent = gameState.researchUnlocked.stadium ? 'Stadium ($15,000)' : 'Stadium (Locked)'; }
+  if (buildMall) { buildMall.disabled = !gameState.researchUnlocked.mall; buildMall.textContent = gameState.researchUnlocked.mall ? 'Mall ($12,000)' : 'Mall (Locked)'; }
+  if (buildFactory) { buildFactory.disabled = !gameState.researchUnlocked.factory; buildFactory.textContent = gameState.researchUnlocked.factory ? 'Factory ($7,000)' : 'Factory (Locked)'; }
+  if (buildPower) { buildPower.disabled = !gameState.researchUnlocked.powerPlant; buildPower.textContent = gameState.researchUnlocked.powerPlant ? 'Power Plant ($25,000)' : 'Power Plant (Locked)'; }
+  if (buildAirportEl) { buildAirportEl.disabled = !gameState.researchUnlocked.airport; buildAirportEl.textContent = gameState.researchUnlocked.airport ? 'Airport ($40,000)' : 'Airport (Locked)'; }
+}
+
+// Populate research modal tree
+function populateResearchTree() {
+  const tree = document.getElementById('researchTree');
+  if (!tree) return;
+  tree.innerHTML = '';
+
+  const items = [
+    { id: 'house', name: 'Advanced Housing', cost: 30, desc: 'Unlock Houses (cheaper, better capacity)' },
+    { id: 'gasStation', name: 'Gas Station', cost: 50, desc: 'Unlock Gas Stations (boost transport)' },
+    { id: 'solar', name: 'Solar Tech', cost: 40, desc: 'Increases happiness and efficiency' },
+    { id: 'skyscraper', name: 'Skyscraper Engineering', cost: 200, desc: 'Unlock Skyscrapers (high income)' },
+    { id: 'transitAI', name: 'Transit AI', cost: 120, desc: 'Improve buses and trains efficiency' },
+    { id: 'hospitalTech', name: 'Healthcare Research', cost: 80, desc: 'Unlock Hospitals (improve population health)' },
+    { id: 'policeTech', name: 'Policing Methods', cost: 60, desc: 'Unlock Police Stations (reduce crime)' },
+    { id: 'education', name: 'Education Reform', cost: 70, desc: 'Unlock Schools (increase population growth)' },
+    { id: 'sports', name: 'Sports & Events', cost: 90, desc: 'Unlock Stadiums (happiness boost, income)' },
+    { id: 'commerce', name: 'Commerce Tech', cost: 100, desc: 'Unlock Malls (commercial income)' },
+    { id: 'industry', name: 'Industrial Automation', cost: 110, desc: 'Unlock Factories (industrial income)' },
+    { id: 'power', name: 'Power Grid', cost: 150, desc: 'Unlock Power Plants (stability, enables airports)' },
+    { id: 'airportTech', name: 'Aviation Tech', cost: 400, desc: 'Unlock Airports (large income)' },
+  ];
+
+  items.forEach(it => {
+    const card = document.createElement('div');
+    card.style.minWidth = '160px';
+    card.style.padding = '8px';
+    card.style.border = '1px solid #444';
+    card.style.borderRadius = '6px';
+    card.style.background = '#111';
+    card.style.cursor = 'pointer';
+    card.style.flex = '0 0 45%';
+    card.id = `research_${it.id}`;
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.textContent = it.name;
+    const desc = document.createElement('div');
+    desc.style.fontSize = '12px';
+    desc.style.marginTop = '6px';
+    desc.textContent = it.desc;
+    const cost = document.createElement('div');
+    cost.style.marginTop = '8px';
+    cost.textContent = `Cost: ${it.cost} RP`;
+
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(cost);
+
+    // color if affordable
+    if (gameState.researchPoints >= it.cost) {
+      card.style.borderColor = '#4caf50';
+      card.style.boxShadow = '0 0 8px rgba(76,175,80,0.2)';
+    }
+
+    card.addEventListener('click', () => {
+      if (gameState.researchPoints >= it.cost) {
+        gameState.researchPoints -= it.cost;
+        // apply unlocks
+        switch (it.id) {
+          case 'house':
+            gameState.researchUnlocked.house = true;
+            break;
+          case 'gasStation':
+            gameState.researchUnlocked.gasStation = true;
+            break;
+          case 'skyscraper':
+            gameState.researchUnlocked.skyscraper = true;
+            break;
+          case 'transitAI':
+            gameState.upgrades.publicTransport = Math.min(3, (gameState.upgrades.publicTransport || 0) + 1);
+            break;
+          case 'solar':
+            gameState.upgrades.happinessBoost = Math.min(3, (gameState.upgrades.happinessBoost || 1) + 1);
+            break;
+          case 'hospitalTech':
+            gameState.researchUnlocked.hospital = true;
+            break;
+          case 'policeTech':
+            gameState.researchUnlocked.police = true;
+            break;
+          case 'education':
+            gameState.researchUnlocked.school = true;
+            break;
+          case 'sports':
+            gameState.researchUnlocked.stadium = true;
+            break;
+          case 'commerce':
+            gameState.researchUnlocked.mall = true;
+            break;
+          case 'industry':
+            gameState.researchUnlocked.factory = true;
+            break;
+          case 'power':
+            gameState.researchUnlocked.powerPlant = true;
+            break;
+          case 'airportTech':
+            gameState.researchUnlocked.airport = true;
+            break;
+          default:
+            break;
+        }
+        updateResearchDisplay();
+        populateResearchTree();
+        persistGameState();
+        showNotification(`Purchased research: ${it.name}`);
+      } else {
+        showNotification('Not enough research points');
+      }
+    });
+
+    tree.appendChild(card);
+  });
+  const modalPoints = document.getElementById('researchPointsModal');
+  if (modalPoints) modalPoints.textContent = gameState.researchPoints.toLocaleString();
+}
+
+// Populate building lists grouped by type
+function populateBuildingLists() {
+  const rec = document.getElementById('buildListRecreational');
+  const res = document.getElementById('buildListResidential');
+  const ind = document.getElementById('buildListIndustrial');
+  if (rec) rec.innerHTML = '';
+  if (res) res.innerHTML = '';
+  if (ind) ind.innerHTML = '';
+
+  scene.traverse((obj) => {
+    if (obj.userData && obj.userData.isBuilding) {
+      const item = document.createElement('div');
+      item.style.border = '1px solid #444';
+      item.style.padding = '6px';
+      item.style.marginBottom = '6px';
+      item.style.cursor = 'pointer';
+      item.textContent = `${capitalizeFirstLetter(obj.userData.type)} (L${obj.userData.level || 1}) @ ${obj.position.x},${obj.position.z}`;
+      item.addEventListener('click', () => {
+        // center camera on building and show info
+        controls.target.set(obj.position.x, 0, obj.position.z);
+        camera.position.set(obj.position.x + 10, obj.position.y + 10, obj.position.z + 10);
+        showBuildingInfo(obj);
+      });
+
+      // classify
+      if (obj.userData.type === 'park' || obj.userData.type === 'researchCenter') {
+        if (rec) rec.appendChild(item);
+      } else if (obj.userData.type === 'residential' || obj.userData.type === 'house') {
+        if (res) res.appendChild(item);
+      } else {
+        if (ind) ind.appendChild(item);
+      }
+    }
+  });
 }
 
 function updatePopulationDisplay() {
@@ -1616,6 +1961,132 @@ function unlockResearch(key, cost) {
   }
 }
 
+// Persist/load game small state to localStorage
+function persistGameState() {
+  try {
+    const state = {
+      fullSave: true,
+      money: gameState.money,
+      population: gameState.population,
+      happiness: gameState.happiness,
+      upgrades: gameState.upgrades,
+      researchPoints: gameState.researchPoints,
+      researchUnlocked: gameState.researchUnlocked,
+      settings: gameState.settings || {},
+      buildings: [],
+      parks: [],
+      roads: [],
+      metroStations: [],
+    };
+
+    scene.traverse((obj) => {
+      if (obj.userData && obj.userData.isBuilding) {
+        state.buildings.push({
+          type: obj.userData.type,
+          x: obj.userData.x ?? obj.position.x,
+          z: obj.userData.z ?? obj.position.z,
+          level: obj.userData.level || 1,
+          income: obj.userData.income || 0,
+        });
+      }
+
+      if (obj._isPark) {
+        state.parks.push({
+          x: obj.userData.x ?? obj.position.x,
+          z: obj.userData.z ?? obj.position.z,
+          size: obj.userData.size || 5,
+          level: obj.userData.level || 1,
+        });
+      }
+
+      if (obj._isRoad) {
+        state.roads.push({ x: obj.userData.x ?? obj.position.x, z: obj.userData.z ?? obj.position.z });
+      }
+
+      if (obj._isMetroStation) {
+        state.metroStations.push({ x: obj.userData.x ?? obj.position.x, z: obj.userData.z ?? obj.position.z, isCentral: !!obj.userData.isCentral });
+      }
+    });
+
+    localStorage.setItem('tycoon_game_state', JSON.stringify(state));
+  } catch (e) {
+    console.warn('Could not persist game state', e);
+  }
+}
+
+function loadGameState() {
+  try {
+    const raw = localStorage.getItem('tycoon_game_state');
+    if (!raw) return;
+    const state = JSON.parse(raw);
+
+    // Backwards-compatible small state
+    if (!state.fullSave) {
+      if (state.researchPoints) gameState.researchPoints = state.researchPoints;
+      if (state.researchUnlocked) gameState.researchUnlocked = state.researchUnlocked;
+      if (state.settings) gameState.settings = state.settings;
+      return;
+    }
+
+    // Clear current city objects (buildings, parks, roads, stations)
+    const toRemove = [];
+    scene.traverse((obj) => {
+      if (obj.userData && obj.userData.isBuilding) toRemove.push(obj);
+      if (obj._isPark) toRemove.push(obj);
+      if (obj._isRoad) toRemove.push(obj);
+      if (obj._isMetroStation) toRemove.push(obj);
+    });
+    toRemove.forEach(o => { scene.remove(o); });
+
+    // Restore basic fields
+    if (typeof state.money === 'number') gameState.money = state.money;
+    if (typeof state.population === 'number') gameState.population = state.population;
+    if (typeof state.happiness === 'number') gameState.happiness = state.happiness;
+    if (state.upgrades) gameState.upgrades = state.upgrades;
+    if (state.researchPoints) gameState.researchPoints = state.researchPoints;
+    if (state.researchUnlocked) gameState.researchUnlocked = state.researchUnlocked;
+    if (state.settings) gameState.settings = state.settings;
+
+    // Recreate roads
+    if (Array.isArray(state.roads)) {
+      state.roads.forEach(r => createRoad(r.x, r.z));
+    }
+
+    // Recreate parks
+    if (Array.isArray(state.parks)) {
+      state.parks.forEach(p => createPark(p.x, p.z, p.size || 5, p.level || 1));
+    }
+
+    // Recreate buildings
+    if (Array.isArray(state.buildings)) {
+      state.buildings.forEach(b => {
+        const grp = createBuilding(b.x, b.z, b.type);
+        if (grp && grp.userData) {
+          grp.userData.level = b.level || 1;
+          grp.userData.income = b.income || buildingTypes[b.type]?.income || 0;
+          grp.userData.x = b.x;
+          grp.userData.z = b.z;
+        }
+      });
+    }
+
+    // Recreate metro stations
+    if (Array.isArray(state.metroStations)) {
+      state.metroStations.forEach(s => createMetroStation(s.x, s.z, !!s.isCentral));
+    }
+
+    // Update UI
+    updateMoneyDisplay();
+    updatePopulationDisplay();
+    updateHappinessDisplay();
+    updateResearchDisplay();
+    updateUpgradeButtons();
+
+  } catch (e) {
+    console.warn('Could not load saved state', e);
+  }
+}
+
 // Update building animations
 function updateBuildingAnimations() {
   scene.traverse((object) => {
@@ -1888,6 +2359,7 @@ function createRoad(x, z) {
 
   // Add road to game state
   road._isRoad = true;
+  road.userData = { x: x, z: z };
 
   // Check if we should add a traffic light
   if (Math.random() < 0.2) {
@@ -2354,6 +2826,9 @@ function createPark(x, z, size, level) {
   // Store park data
   parkGroup.userData = {
     level: level,
+    size: size,
+    x: x,
+    z: z,
   };
 
   scene.add(parkGroup);
