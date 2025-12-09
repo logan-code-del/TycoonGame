@@ -70,6 +70,14 @@ const buildingTypes = {
     income: 200,
     color: 0xff6666,
   },
+  road: {
+    cost: (level) => 500, // Fixed cost for roads
+    color: 0x444444,
+  },
+  park: {
+    cost: (level) => 2000, // Fixed cost for parks
+    color: 0x33aa33,
+  },
 };
 // Initialize game
 init();
@@ -650,9 +658,11 @@ function setBuildMode(mode) {
 
 function updateBuildButtonText(type, level) {
   const cost = buildingTypes[type].cost(level);
-  document.getElementById(
-    `build${type.charAt(0).toUpperCase() + type.slice(1)}`
-  ).textContent = `${capitalizeFirstLetter(type)} ($${cost.toLocaleString()})`;
+  const buttonId = type === 'road' ? 'buildRoad' : type === 'park' ? 'buildPark' : `build${type.charAt(0).toUpperCase() + type.slice(1)}`;
+  const buttonElement = document.getElementById(buttonId);
+  if (buttonElement) {
+    buttonElement.textContent = `${capitalizeFirstLetter(type)} ($${cost.toLocaleString()})`;
+  }
 }
 // Cancel build mode
 function cancelBuildMode() {
@@ -1409,7 +1419,6 @@ function updateBuildingAnimations() {
 }
 
 // Handle mouse click on the canvas
-// Handle mouse click on the canvas
 function onMouseClick(event) {
     // Calculate mouse position in normalized device coordinates (-1 to +1)
     const mouse = new THREE.Vector2();
@@ -1421,10 +1430,7 @@ function onMouseClick(event) {
     raycaster.setFromCamera(mouse, camera);
     
     // Check if we're in build mode
-    if (gameState.buildMode === 'residential' || 
-        gameState.buildMode === 'commercial' || 
-        gameState.buildMode === 'industrial') {
-        
+    if (gameState.buildMode) {
         // Find intersection with ground plane
         const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const target = new THREE.Vector3();
@@ -1434,31 +1440,84 @@ function onMouseClick(event) {
             const x = Math.round(target.x / 5) * 5;
             const z = Math.round(target.z / 5) * 5;
             
-            // Check if we have enough money
-            const buildingCost = buildingTypes[gameState.buildMode].cost(1); // Cost for level 1
-            
-            if (gameState.money >= buildingCost) {
-                // Deduct cost
-                gameState.money -= buildingCost;
-                updateMoneyDisplay();
+            if (gameState.buildMode === 'residential' || 
+                gameState.buildMode === 'commercial' || 
+                gameState.buildMode === 'industrial') {
                 
-                // Create building
-                const newBuilding = createBuilding(x, z, gameState.buildMode);
-                newBuilding.userData.level = 1; // Set initial level
+                // Check if we have enough money
+                const buildingCost = buildingTypes[gameState.buildMode].cost(1); // Cost for level 1
                 
-                // Store the exact coordinates in the building data
-                newBuilding.userData.x = x;
-                newBuilding.userData.z = z;
+                if (gameState.money >= buildingCost) {
+                    // Deduct cost
+                    gameState.money -= buildingCost;
+                    updateMoneyDisplay();
+                    
+                    // Create building
+                    const newBuilding = createBuilding(x, z, gameState.buildMode);
+                    newBuilding.userData.level = 1; // Set initial level
+                    
+                    // Store the exact coordinates in the building data
+                    newBuilding.userData.x = x;
+                    newBuilding.userData.z = z;
 
-                showNotification(`Built ${gameState.buildMode} building for ${buildingCost.toLocaleString()}`);
-                
-                // Keep build mode active for multiple placements
-                // Update placement indicator position
-                if (gameState.placementIndicator) {
-                    gameState.placementIndicator.position.set(x, 0, z);
+                    showNotification(`Built ${gameState.buildMode} building for $${buildingCost.toLocaleString()}`);
+                } else {
+                    showNotification(`Not enough money to build ${gameState.buildMode} building`);
                 }
-            } else {
-                showNotification(`Not enough money to build ${gameState.buildMode} building`);
+            } else if (gameState.buildMode === 'road') {
+                // Handle road placement
+                const roadCost = buildingTypes.road.cost();
+                
+                if (gameState.money >= roadCost) {
+                    // Check if road already exists at this location
+                    let roadExists = false;
+                    scene.traverse((object) => {
+                        if (object._isRoad && 
+                            Math.abs(object.position.x - x) < 1 && 
+                            Math.abs(object.position.z - z) < 1) {
+                            roadExists = true;
+                        }
+                    });
+                    
+                    if (!roadExists) {
+                        gameState.money -= roadCost;
+                        updateMoneyDisplay();
+                        
+                        createRoad(x, z);
+                        showNotification(`Built road for $${roadCost.toLocaleString()}`);
+                    } else {
+                        showNotification("Road already exists at this location");
+                    }
+                } else {
+                    showNotification(`Not enough money to build road (cost: $${roadCost.toLocaleString()})`);
+                }
+            } else if (gameState.buildMode === 'park') {
+                // Handle park placement
+                const parkCost = buildingTypes.park.cost();
+                
+                if (gameState.money >= parkCost) {
+                    // Check if park already exists at this location
+                    let parkExists = false;
+                    scene.traverse((object) => {
+                        if (object._isPark && 
+                            Math.abs(object.position.x - x) < 2.5 && 
+                            Math.abs(object.position.z - z) < 2.5) {
+                            parkExists = true;
+                        }
+                    });
+                    
+                    if (!parkExists) {
+                        gameState.money -= parkCost;
+                        updateMoneyDisplay();
+                        
+                        createPark(x, z, 5, 1);
+                        showNotification(`Built park for $${parkCost.toLocaleString()}`);
+                    } else {
+                        showNotification("Park already exists at this location");
+                    }
+                } else {
+                    showNotification(`Not enough money to build park (cost: $${parkCost.toLocaleString()})`);
+                }
             }
         }
     } else {
