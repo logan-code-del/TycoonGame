@@ -24,10 +24,11 @@ document.body.appendChild(renderer.domElement);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
-controls.screenSpacePanning = false;
+controls.screenSpacePanning = true; // Enable panning with middle mouse button
 controls.minDistance = 10;
-controls.maxDistance = 100;
+controls.maxDistance = 300; // Allow zooming out further
 controls.maxPolarAngle = Math.PI / 2.1; // Prevent going below ground
+controls.autoRotate = false;
 
 // Game state
 const gameState = {
@@ -51,6 +52,12 @@ const gameState = {
     parks: 1,
     publicTransport: 0,
   },
+  cameraKeys: {
+    w: false,
+    a: false,
+    s: false,
+    d: false,
+  }
 };
 
 // Building types
@@ -142,6 +149,7 @@ function init() {
     .addEventListener("click", hideBuildingInfo);
 
   window.addEventListener("keydown", handleKeyPress);
+  window.addEventListener("keyup", handleKeyUp);
 
   // Add lights
   addLights();
@@ -189,6 +197,22 @@ function handleKeyPress(event) {
   if (event.key === "Escape") {
     cancelBuildMode();
   }
+  
+  // Camera movement with WASD keys
+  const key = event.key.toLowerCase();
+  if (key === 'w') gameState.cameraKeys.w = true;
+  if (key === 'a') gameState.cameraKeys.a = true;
+  if (key === 's') gameState.cameraKeys.s = true;
+  if (key === 'd') gameState.cameraKeys.d = true;
+}
+
+//handle key releases
+function handleKeyUp(event) {
+  const key = event.key.toLowerCase();
+  if (key === 'w') gameState.cameraKeys.w = false;
+  if (key === 'a') gameState.cameraKeys.a = false;
+  if (key === 's') gameState.cameraKeys.s = false;
+  if (key === 'd') gameState.cameraKeys.d = false;
 }
 
 // Handle window resize
@@ -204,6 +228,21 @@ function animate() {
 
   // Update controls
   controls.update();
+
+  // Handle WASD camera movement
+  const cameraSpeed = 0.5;
+  if (gameState.cameraKeys.w) {
+    controls.target.z -= cameraSpeed;
+  }
+  if (gameState.cameraKeys.s) {
+    controls.target.z += cameraSpeed;
+  }
+  if (gameState.cameraKeys.a) {
+    controls.target.x -= cameraSpeed;
+  }
+  if (gameState.cameraKeys.d) {
+    controls.target.x += cameraSpeed;
+  }
 
   // Update game time
   gameState.gameTime += 1 / 30; // Assuming 30 FPS
@@ -288,62 +327,141 @@ function updateTrafficLights() {
 function createBus(route) {
   const busGroup = new THREE.Group();
 
-  // Create bus body
-  const bodyGeometry = new THREE.BoxGeometry(2, 1, 4);
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc00 });
+  // Create main body - larger and more detailed
+  const bodyGeometry = new THREE.BoxGeometry(2.2, 2.5, 5);
+  const bodyMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0xff6600,
+    metalness: 0.3,
+    roughness: 0.7
+  });
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-  body.position.y = 0.8;
+  body.position.y = 1.25;
+  body.castShadow = true;
   busGroup.add(body);
 
-  // Create wheels
-  const wheelGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  // Create roof
+  const roofGeometry = new THREE.BoxGeometry(2.2, 0.3, 5);
+  const roofMaterial = new THREE.MeshStandardMaterial({ color: 0xff8800 });
+  const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+  roof.position.y = 2.65;
+  roof.castShadow = true;
+  busGroup.add(roof);
+
+  // Create front bumper/grille
+  const bumperGeometry = new THREE.BoxGeometry(2.2, 0.4, 0.3);
+  const bumperMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  const bumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
+  bumper.position.set(0, 0.5, 2.65);
+  busGroup.add(bumper);
+
+  // Create headlights
+  const lightGeometry = new THREE.CylinderGeometry(0.15, 0.15, 0.1, 16);
+  const lightMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0xffff99,
+    emissive: 0xffff00,
+    emissiveIntensity: 0.6
+  });
+  const leftHeadlight = new THREE.Mesh(lightGeometry, lightMaterial);
+  leftHeadlight.position.set(-0.6, 1.2, 2.7);
+  leftHeadlight.rotation.x = Math.PI / 2;
+  busGroup.add(leftHeadlight);
+  
+  const rightHeadlight = new THREE.Mesh(lightGeometry, lightMaterial);
+  rightHeadlight.position.set(0.6, 1.2, 2.7);
+  rightHeadlight.rotation.x = Math.PI / 2;
+  busGroup.add(rightHeadlight);
+
+  // Create wheels - improved
+  const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.25, 32);
+  const wheelMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x222222,
+    metalness: 0.8,
+    roughness: 0.3
+  });
+  const rimMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x666666,
+    metalness: 0.9,
+    roughness: 0.2
+  });
 
   const wheelPositions = [
-    [-0.8, 0.3, -1.5],
-    [0.8, 0.3, -1.5],
-    [-0.8, 0.3, 1.5],
-    [0.8, 0.3, 1.5],
+    [-0.9, 0.4, -1.2],
+    [0.9, 0.4, -1.2],
+    [-0.9, 0.4, 1.2],
+    [0.9, 0.4, 1.2],
   ];
 
   wheelPositions.forEach((pos) => {
     const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
     wheel.position.set(pos[0], pos[1], pos[2]);
     wheel.rotation.z = Math.PI / 2;
+    wheel.castShadow = true;
     busGroup.add(wheel);
+    
+    // Add rim
+    const rimGeometry = new THREE.TorusGeometry(0.35, 0.08, 8, 16);
+    const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+    rim.position.set(pos[0], pos[1], pos[2]);
+    rim.rotation.y = Math.PI / 2;
+    busGroup.add(rim);
   });
 
-  // Create windows
+  // Create windows - better positioned
   const windowMaterial = new THREE.MeshStandardMaterial({
-    color: 0x88ccff,
+    color: 0x4488dd,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.6,
+    metalness: 0.1,
+    roughness: 0.2
   });
 
-  // Side windows
-  const sideWindowGeometry = new THREE.PlaneGeometry(1.8, 0.6);
-
-  const leftWindow = new THREE.Mesh(sideWindowGeometry, windowMaterial);
-  leftWindow.position.set(-1.01, 1, 0);
-  leftWindow.rotation.y = Math.PI / 2;
-  busGroup.add(leftWindow);
-
-  const rightWindow = new THREE.Mesh(sideWindowGeometry, windowMaterial);
-  rightWindow.position.set(1.01, 1, 0);
-  rightWindow.rotation.y = -Math.PI / 2;
-  busGroup.add(rightWindow);
-
-  // Front and back windows
-  const frontBackWindowGeometry = new THREE.PlaneGeometry(1.8, 0.6);
-
-  const frontWindow = new THREE.Mesh(frontBackWindowGeometry, windowMaterial);
-  frontWindow.position.set(0, 1, -2.01);
+  // Front window
+  const frontWindowGeometry = new THREE.PlaneGeometry(1.8, 1.2);
+  const frontWindow = new THREE.Mesh(frontWindowGeometry, windowMaterial);
+  frontWindow.position.set(0, 1.5, 2.4);
   busGroup.add(frontWindow);
 
-  const backWindow = new THREE.Mesh(frontBackWindowGeometry, windowMaterial);
-  backWindow.position.set(0, 1, 2.01);
+  // Side windows - multiple for better look
+  const sideWindowGeometry = new THREE.PlaneGeometry(1.5, 1);
+  
+  // Left side windows
+  for (let i = 0; i < 2; i++) {
+    const window = new THREE.Mesh(sideWindowGeometry, windowMaterial);
+    window.position.set(-1.11, 1.5, -0.5 + i * 1.5);
+    window.rotation.y = Math.PI / 2;
+    busGroup.add(window);
+  }
+  
+  // Right side windows
+  for (let i = 0; i < 2; i++) {
+    const window = new THREE.Mesh(sideWindowGeometry, windowMaterial);
+    window.position.set(1.11, 1.5, -0.5 + i * 1.5);
+    window.rotation.y = -Math.PI / 2;
+    busGroup.add(window);
+  }
+
+  // Back window
+  const backWindowGeometry = new THREE.PlaneGeometry(1.8, 1.2);
+  const backWindow = new THREE.Mesh(backWindowGeometry, windowMaterial);
+  backWindow.position.set(0, 1.5, -2.4);
   backWindow.rotation.y = Math.PI;
   busGroup.add(backWindow);
+
+  // Door
+  const doorGeometry = new THREE.PlaneGeometry(0.8, 1.8);
+  const doorMaterial = new THREE.MeshStandardMaterial({ color: 0xcc5500 });
+  const door = new THREE.Mesh(doorGeometry, doorMaterial);
+  door.position.set(-1.11, 1.4, 0.8);
+  door.rotation.y = Math.PI / 2;
+  busGroup.add(door);
+
+  // Door handle
+  const handleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.2, 8);
+  const handleMaterial = new THREE.MeshStandardMaterial({ color: 0x999999 });
+  const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+  handle.position.set(-1.12, 1.4, 0.8);
+  handle.rotation.z = Math.PI / 2;
+  busGroup.add(handle);
 
   // Set initial position based on route
   if (route === "eastWest") {
@@ -1772,7 +1890,7 @@ function showBuildingInfo(building) {
   ).textContent = `$${buildingData.income.toLocaleString()}`;
 
   // Calculate upgrade cost
-  const upgradeCost = (buildingData.level || 1) * buildingTypes[buildingData.type].cost;
+  const upgradeCost = (buildingData.level || 1) * buildingTypes[buildingData.type].cost(buildingData.level || 1);
   document.getElementById(
     "upgradeCostBB"
    ).textContent = `$ ${upgradeCost.toLocaleString()}`;
@@ -1795,7 +1913,7 @@ function upgradeSelectedBuilding() {
 
   const buildingData = gameState.selectedBuilding.userData;
   const currentLevel = buildingData.level || 1;
-  const upgradeCost = currentLevel * buildingTypes[buildingData.type].cost;
+  const upgradeCost = currentLevel * buildingTypes[buildingData.type].cost(currentLevel);
 
   if (gameState.money >= upgradeCost) {
     // Deduct cost
