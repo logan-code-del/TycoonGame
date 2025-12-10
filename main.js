@@ -76,7 +76,8 @@ const gameState = {
     s: false,
     d: false,
   },
-  vehicles: []
+  vehicles: [],
+  people: []
 };
 
 // Building types
@@ -355,8 +356,8 @@ function init() {
       createMetroStation(-30, 30, false);
 
       // Add buses for level 3
-      createBus("eastWest");
-      createBus("northSouth");
+      spawnBusOnRoad();
+      spawnBusOnRoad();
     }
   }
 
@@ -495,6 +496,9 @@ function animate() {
   // Update vehicles (cars on roads)
   updateVehicles();
 
+  // Update people (pedestrians)
+  updatePeople();
+
   // Render scene
   renderer.render(scene, camera);
 }
@@ -504,25 +508,34 @@ function updateTrafficLights() {
   scene.traverse((object) => {
     if (object._isTrafficLight) {
       const data = object.userData;
-      data.timer += 1;
+      data.timer = (data.timer || 0) + 1;
 
       // Change light every 90 frames (about 3 seconds)
       if (data.timer >= 90) {
         data.timer = 0;
 
         // Cycle through states: red -> green -> yellow -> red
-        if (data.state === "red") {
-          data.redLight.emissiveIntensity = 0.2;
-          data.greenLight.emissiveIntensity = 0.8;
-          data.state = "green";
-        } else if (data.state === "green") {
-          data.greenLight.emissiveIntensity = 0.2;
-          data.yellowLight.emissiveIntensity = 0.8;
-          data.state = "yellow";
-        } else {
-          data.yellowLight.emissiveIntensity = 0.2;
-          data.redLight.emissiveIntensity = 0.8;
-          data.state = "red";
+        if (data.state === "red") data.state = "green";
+        else if (data.state === "green") data.state = "yellow";
+        else data.state = "red";
+      }
+
+      // Apply visual emissive intensity for each approach light
+      if (Array.isArray(data.lights)) {
+        for (const entry of data.lights) {
+          if (data.state === 'red') {
+            entry.red.emissiveIntensity = 0.8;
+            entry.yellow.emissiveIntensity = 0.1;
+            entry.green.emissiveIntensity = 0.05;
+          } else if (data.state === 'green') {
+            entry.red.emissiveIntensity = 0.05;
+            entry.yellow.emissiveIntensity = 0.1;
+            entry.green.emissiveIntensity = 0.8;
+          } else {
+            entry.red.emissiveIntensity = 0.05;
+            entry.yellow.emissiveIntensity = 0.8;
+            entry.green.emissiveIntensity = 0.05;
+          }
         }
       }
     }
@@ -714,27 +727,108 @@ function getRoadNetwork() {
 }
 
 function buildRoadPath(startRoad) {
-  const visited = new Set();
-  const queue = [startRoad];
+  // Walk the road network from startRoad and return an ordered sequence of road nodes.
   const path = [];
   const roads = getRoadNetwork();
-  
-  while (queue.length > 0 && path.length < 20) {
-    const current = queue.shift();
-    if (visited.has(current)) continue;
-    visited.add(current);
+  if (!startRoad) return path;
+
+  let current = startRoad;
+  let prev = null;
+  const MAXLEN = 20;
+  while (current && path.length < MAXLEN) {
     path.push(current);
-    
+
+    // find cardinal neighbors of current
+    const neighbors = [];
     roads.forEach((r) => {
-      if (visited.has(r.obj)) return;
-      const dx = Math.abs(r.pos.x - current.position.x);
-      const dz = Math.abs(r.pos.z - current.position.z);
-      if ((dx === 0 && dz > 0 && dz <= 6.5) || (dz === 0 && dx > 0 && dx <= 6.5)) {
-        queue.push(r.obj);
-      }
+      if (r.obj === current) return;
+      const dx = r.pos.x - current.position.x;
+      const dz = r.pos.z - current.position.z;
+      const EPS = 0.2;
+      // cardinal neighbors are ~6 units away on grid
+      if (Math.abs(dx) < EPS && Math.abs(Math.abs(dz) - 6) < 0.5) neighbors.push(r.obj);
+      if (Math.abs(dz) < EPS && Math.abs(Math.abs(dx) - 6) < 0.5) neighbors.push(r.obj);
     });
+
+    // remove the previous node so we don't go backward unless forced
+    const choices = neighbors.filter(n => n !== prev);
+    if (choices.length === 0) break;
+
+    // pick the neighbor that continues straight if possible
+    let next = choices[Math.floor(Math.random() * choices.length)];
+    if (prev) {
+      const vPrev = new THREE.Vector3(current.position.x - prev.position.x, 0, current.position.z - prev.position.z).normalize();
+      let bestDot = -Infinity;
+      choices.forEach(c => {
+        const vCur = new THREE.Vector3(c.position.x - current.position.x, 0, c.position.z - current.position.z).normalize();
+        const dot = vPrev.dot(vCur);
+        if (dot > bestDot) { bestDot = dot; next = c; }
+      });
+    }
+
+    prev = current;
+    current = next;
   }
   return path;
+}
+
+// Determine turn type: 0 = straight, 1 = right, 2 = left
+function getTurnType(prevNode, curNode, nextNode) {
+  if (!prevNode || !curNode || !nextNode) return 0;
+  const v1 = new THREE.Vector3(curNode.position.x - prevNode.position.x, 0, curNode.position.z - prevNode.position.z).normalize();
+  const v2 = new THREE.Vector3(nextNode.position.x - curNode.position.x, 0, nextNode.position.z - curNode.position.z).normalize();
+  const angle = Math.atan2(v2.x * v1.z - v2.z * v1.x, v1.x * v2.x + v1.z * v2.z); // signed angle from v1 to v2
+  const absA = Math.abs(angle);
+  if (absA < 0.4) return 0; // straight
+  return angle < 0 ? 1 : 2; // right if negative, left if positive
+}
+
+function tryReserveIntersectionForCar(car, fromNode, intersectionNode, turnType) {
+  if (!intersectionNode || !intersectionNode.userData || !intersectionNode.userData.intersection) return true;
+  const inter = intersectionNode.userData.intersection;
+  const capacity = 2; // how many vehicles can occupy intersection simultaneously
+
+  // If already reserved, allow
+  if (car.userData.intersectionReserved === intersectionNode) return true;
+
+  // If there is space and no higher-priority waiting car, grant reservation
+  // compute if any waiting car has higher priority (lower numeric value)
+  const hasHigherWaiting = inter.waiting.some(w => w.turnPriority < turnType && w.car !== car);
+  if (inter.occupants.length < capacity && !hasHigherWaiting) {
+    inter.occupants.push(car);
+    car.userData.intersectionReserved = intersectionNode;
+    // remove from waiting list if present
+    inter.waiting = inter.waiting.filter(w => w.car !== car);
+    if (car.userData) car.userData.waitTimer = 0;
+    return true;
+  }
+
+  // Otherwise add to waiting list (if not already present)
+  if (!inter.waiting.some(w => w.car === car)) {
+    inter.waiting.push({ car: car, turnPriority: turnType, ts: Date.now() });
+  }
+  return false;
+}
+
+function releaseIntersectionForCar(car, intersectionNode) {
+  if (!intersectionNode || !intersectionNode.userData || !intersectionNode.userData.intersection) return;
+  const inter = intersectionNode.userData.intersection;
+  const idx = inter.occupants.indexOf(car);
+  if (idx >= 0) inter.occupants.splice(idx, 1);
+
+  // Try to admit next waiting car(s) based on priority and capacity
+  if (inter.waiting.length > 0) {
+    // sort waiting by priority then FIFO
+    inter.waiting.sort((a, b) => (a.turnPriority - b.turnPriority) || (a.ts - b.ts));
+    while (inter.occupants.length < 2 && inter.waiting.length > 0) {
+      const next = inter.waiting.shift();
+      if (next && next.car) {
+        inter.occupants.push(next.car);
+        next.car.userData.intersectionReserved = intersectionNode;
+        if (next.car.userData) next.car.userData.waitTimer = 0;
+      }
+    }
+  }
 }
 
 function findNearestGasStation(pos) {
@@ -782,6 +876,8 @@ function spawnCarOnRoad() {
   
   car.position.set(path[0].position.x, 0.1, path[0].position.z);
   car.castShadow = true;
+  // assign lane side (-1 or +1) so cars pick a lane and keep it
+  const laneSide = Math.random() < 0.5 ? -1 : 1;
   car.userData = {
     speed: 0.15 + Math.random() * 0.15,
     path: path,
@@ -789,8 +885,13 @@ function spawnCarOnRoad() {
     progress: 0,
     waitTimer: 0,
     spawnTime: gameState.gameTime,
-    rotationVelocity: 0
+    rotationVelocity: 0,
+    laneSide: laneSide
   };
+  // add to start node queue
+  if (!path[0].userData) path[0].userData = {};
+  path[0].userData.queue = path[0].userData.queue || [];
+  path[0].userData.queue.push(car);
   scene.add(car);
   return car;
 }
@@ -847,18 +948,78 @@ function updateVehicles() {
     
     const currentNode = path[idx];
     const nextNode = path[idx + 1];
+    // compute lane offset per segment axis
+    const LANE_OFFSET = 0.6;
+    const dxSeg = nextNode.position.x - currentNode.position.x;
+    const dzSeg = nextNode.position.z - currentNode.position.z;
+    const isEW = Math.abs(dxSeg) > Math.abs(dzSeg);
+    const laneSide = car.userData.laneSide || 1;
     const startPos = new THREE.Vector3(currentNode.position.x, 0.1, currentNode.position.z);
     const endPos = new THREE.Vector3(nextNode.position.x, 0.1, nextNode.position.z);
+    if (isEW) {
+      startPos.z += laneSide * LANE_OFFSET;
+      endPos.z += laneSide * LANE_OFFSET;
+    } else {
+      startPos.x += laneSide * LANE_OFFSET;
+      endPos.x += laneSide * LANE_OFFSET;
+    }
     const distance = startPos.distanceTo(endPos);
     
+    // intersection reservation / queuing logic
+    if (car.userData.progress > 0.65) {
+      // approaching decision point — try to reserve intersection if next is an intersection
+      if (nextNode.userData && nextNode.userData.isIntersection) {
+        const prevNode = idx > 0 ? path[idx - 1] : currentNode;
+        const turnType = getTurnType(prevNode, currentNode, nextNode);
+        const reserved = tryReserveIntersectionForCar(car, currentNode, nextNode, turnType);
+        if (!reserved) {
+          car.userData.waitTimer = 6;
+          continue;
+        }
+      } else {
+        // non-intersection congestion: simple per-node capacity
+        const queueAtNext = nextNode.userData && Array.isArray(nextNode.userData.queue) ? nextNode.userData.queue.length : 0;
+        const MAX_PER_NODE = 2;
+        if (queueAtNext >= MAX_PER_NODE) {
+          car.userData.waitTimer = 6;
+          continue;
+        }
+      }
+    }
+
     car.userData.progress += car.userData.speed / distance;
     
     if (car.userData.progress >= 1.0) {
+      // leaving currentNode -> remove from its queue
+      if (currentNode.userData && Array.isArray(currentNode.userData.queue)) {
+        const idxq = currentNode.userData.queue.indexOf(car);
+        if (idxq >= 0) currentNode.userData.queue.splice(idxq, 1);
+      }
+
+      // if we are leaving an intersection, release our reservation there
+      if (currentNode.userData && currentNode.userData.isIntersection) {
+        releaseIntersectionForCar(car, currentNode);
+        if (car.userData && car.userData.intersectionReserved === currentNode) delete car.userData.intersectionReserved;
+      }
+
       car.userData.pathIndex++;
       car.userData.progress = 0;
-      
+
+      const arrivedNode = nextNode;
+      arrivedNode.userData = arrivedNode.userData || {};
+      arrivedNode.userData.queue = arrivedNode.userData.queue || [];
+      arrivedNode.userData.queue.push(car);
+
+      // If we arrived into an intersection and we had a reservation, ensure we are tracked
+      if (arrivedNode.userData.isIntersection && arrivedNode.userData.intersection) {
+        const inter = arrivedNode.userData.intersection;
+        if (!inter.occupants.includes(car) && car.userData && car.userData.intersectionReserved === arrivedNode) {
+          inter.occupants.push(car);
+        }
+      }
+
       // Check for gas station at this road node
-      const gasStation = findNearestGasStation(endPos);
+      const gasStation = findNearestGasStation(new THREE.Vector3(arrivedNode.position.x, 0, arrivedNode.position.z));
       if (gasStation && Math.random() < 0.4) {
         car.userData.waitTimer = 60 + Math.floor(Math.random() * 80);
       }
@@ -866,10 +1027,29 @@ function updateVehicles() {
       // Linear interpolation along current segment
       car.position.lerpVectors(startPos, endPos, car.userData.progress);
       
-      // Smooth turning animation
+      // Smooth turning animation and stop for traffic lights
       const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-      const angle = Math.atan2(targetDir.x, targetDir.z);
+      const dx = endPos.x - startPos.x;
+      const dz = endPos.z - startPos.z;
+      const angle = Math.atan2(dx, dz); // rotation around Y axis
       const currentAngle = car.rotation.y;
+
+      // Stop at traffic lights if present near the end of this segment
+      let stopForLight = false;
+      scene.traverse((obj) => {
+        if (obj._isTrafficLight) {
+          const lightPos = obj.position;
+          const dToLight = Math.hypot(lightPos.x - endPos.x, lightPos.z - endPos.z);
+          if (dToLight < 3) {
+            const state = obj.userData.state || 'green';
+            if (state === 'red' || state === 'yellow') stopForLight = true;
+          }
+        }
+      });
+      if (stopForLight) {
+        car.userData.waitTimer = 30; // wait until light cycles
+        continue;
+      }
       
       let diff = angle - currentAngle;
       while (diff > Math.PI) diff -= Math.PI * 2;
@@ -878,6 +1058,97 @@ function updateVehicles() {
       car.userData.rotationVelocity *= 0.85;
       car.rotation.y += car.userData.rotationVelocity;
     }
+  }
+}
+
+// Buses spawning (public transport) reuse road paths but are larger/slower
+function spawnBusOnRoad() {
+  const roads = getRoadNetwork();
+  if (roads.length === 0) return null;
+  const startRoad = roads[Math.floor(Math.random() * roads.length)].obj;
+  const path = buildRoadPath(startRoad);
+  if (path.length < 2) return null;
+  const bus = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0xff8800 }));
+  body.position.y = 0.6;
+  bus.add(body);
+  bus.position.set(path[0].position.x, 0.1, path[0].position.z);
+  const laneSide = Math.random() < 0.5 ? -1 : 1;
+  bus.userData = {
+    speed: 0.08,
+    path: path,
+    pathIndex: 0,
+    progress: 0,
+    waitTimer: 0,
+    spawnTime: gameState.gameTime,
+    rotationVelocity: 0,
+    laneSide: laneSide
+  };
+  // add to start node queue
+  if (!path[0].userData) path[0].userData = {};
+  path[0].userData.queue = path[0].userData.queue || [];
+  path[0].userData.queue.push(bus);
+  scene.add(bus);
+  gameState.vehicles.push(bus);
+  return bus;
+}
+
+// --- Pedestrian system ---
+function spawnPersonAtBuilding(buildingObj) {
+  const person = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffddaa })
+  );
+  const x = buildingObj.position.x + (Math.random() - 0.5) * 4;
+  const z = buildingObj.position.z + (Math.random() - 0.5) * 4;
+  person.position.set(x, 0.2, z);
+  person.userData = {
+    homeX: buildingObj.position.x,
+    homeZ: buildingObj.position.z,
+    target: null,
+    speed: 0.02 + Math.random() * 0.03,
+    wanderRadius: 4 + Math.random() * 6,
+    lifespan: gameState.gameTime
+  };
+  scene.add(person);
+  gameState.people.push(person);
+  return person;
+}
+
+function updatePeople() {
+  if (!gameState.people) gameState.people = [];
+  // spawn a few people near residential buildings if under cap
+  const MAX_PEOPLE = 40;
+  if (gameState.people.length < MAX_PEOPLE && Math.random() < 0.02) {
+    // pick a residential building
+    const res = [];
+    scene.traverse((obj) => { if (obj.userData && (obj.userData.type === 'residential' || obj.userData.type === 'house')) res.push(obj); });
+    if (res.length > 0) spawnPersonAtBuilding(res[Math.floor(Math.random() * res.length)]);
+  }
+
+  for (let i = gameState.people.length -1; i >=0; i--) {
+    const p = gameState.people[i];
+    if (!p.userData) { gameState.people.splice(i,1); scene.remove(p); continue; }
+    // choose new target occasionally
+    if (!p.userData.target || Math.random() < 0.01) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = p.userData.wanderRadius;
+      const tx = p.userData.homeX + Math.cos(angle) * r;
+      const tz = p.userData.homeZ + Math.sin(angle) * r;
+      p.userData.target = new THREE.Vector3(tx, 0.2, tz);
+    }
+    // move toward target
+    const tgt = p.userData.target;
+    const dir = new THREE.Vector3().subVectors(tgt, p.position);
+    const dist = dir.length();
+    if (dist < 0.2) {
+      if (Math.random() < 0.02) p.userData.target = null; // pick new point later
+      continue;
+    }
+    dir.normalize();
+    p.position.add(dir.multiplyScalar(p.userData.speed));
+    // simple despawn if very far or old
+    if (gameState.gameTime - p.userData.lifespan > 600) { scene.remove(p); gameState.people.splice(i,1); }
   }
 }
 
@@ -1013,38 +1284,41 @@ function createBuilding(x, z, type) {
 
     buildingGroup.userData.isResearchCenter = true;
   } else if (type === "gasStation") {
-    const gsBase = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 5), new THREE.MeshStandardMaterial({ color: buildingTypes.gasStation.color }));
-    gsBase.position.y = 0.5;
+    // Gas station base and store
+    const gsBase = new THREE.Mesh(new THREE.BoxGeometry(5, 0.8, 6), new THREE.MeshStandardMaterial({ color: buildingTypes.gasStation.color }));
+    gsBase.position.y = 0.4;
     buildingGroup.add(gsBase);
-    
-    // Add gas pump stations (visual markers for vehicles to target)
-    for (let i = 0; i < 2; i++) {
-      const pumpGroup = new THREE.Group();
-      pumpGroup.position.x = (i - 0.5) * 1.5;
-      
-      // Pump pole
-      const poleGeom = new THREE.CylinderGeometry(0.15, 0.15, 2, 8);
-      const poleMat = new THREE.MeshStandardMaterial({ color: 0xff6600 });
-      const pole = new THREE.Mesh(poleGeom, poleMat);
-      pole.position.y = 1;
-      pumpGroup.add(pole);
-      
-      // Pump head
-      const headGeom = new THREE.BoxGeometry(0.4, 0.6, 0.3);
-      const headMat = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
-      const head = new THREE.Mesh(headGeom, headMat);
-      head.position.y = 2;
-      pumpGroup.add(head);
-      
-      // Display screen
-      const screenGeom = new THREE.PlaneGeometry(0.3, 0.4);
-      const screenMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x00ff00, emissiveIntensity: 0.3 });
-      const screen = new THREE.Mesh(screenGeom, screenMat);
-      screen.position.set(0, 1.9, 0.16);
-      pumpGroup.add(screen);
-      
-      buildingGroup.add(pumpGroup);
+
+    // Canopy / cover
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.4, 3.6), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    canopy.position.set(0, 1.6, -0.2);
+    buildingGroup.add(canopy);
+
+    // Canopy supports
+    for (let i = 0; i < 4; i++) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.6, 8), new THREE.MeshStandardMaterial({ color: 0x999999 }));
+      col.position.set(i < 2 ? -2.8 : 2.8, 0.8, i % 2 === 0 ? -1 : 1);
+      buildingGroup.add(col);
     }
+
+    // Pumps under canopy
+    for (let i = 0; i < 2; i++) {
+      const pump = new THREE.Group();
+      pump.position.set((i - 0.5) * 2, 0.6, 0);
+      const pumpPole = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), new THREE.MeshStandardMaterial({ color: 0xff6600 }));
+      pumpPole.position.y = 0.4;
+      pump.add(pumpPole);
+      const pumpTop = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.4), new THREE.MeshStandardMaterial({ color: 0xffaa00 }));
+      pumpTop.position.y = 0.9;
+      pump.add(pumpTop);
+      buildingGroup.add(pump);
+    }
+
+    // Small convenience store at the back
+    const store = new THREE.Mesh(new THREE.BoxGeometry(3, 1.6, 2.6), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+    store.position.set(0, 0.8, 2);
+    buildingGroup.add(store);
+
     buildingGroup.userData.isGasStation = true;
   } else if (type === "house") {
     const roof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.5, 4), new THREE.MeshStandardMaterial({ color: buildingTypes.house.color }));
@@ -1639,9 +1913,9 @@ function applyUpgradeEffects(upgradeType) {
         createMetroStation(30, -30, false);
         createMetroStation(-30, 30, false);
 
-        // Add buses for level 3
-        createBus("eastWest");
-        createBus("northSouth");
+        // Add buses for level 3 (road-following buses)
+        spawnBusOnRoad();
+        spawnBusOnRoad();
       }
       break;
   }
@@ -2653,11 +2927,34 @@ function createRoad(x, z) {
 
   // Add road to game state
   road._isRoad = true;
-  road.userData = { x: x, z: z };
+  road.userData = { x: x, z: z, queue: [] };
 
-  // Check if we should add a traffic light
-  if (Math.random() < 0.2) {
-    createTrafficLight(x, z);
+  // Detect neighboring roads (cardinal directions, grid spacing = 6)
+  const neighbors = { north: false, south: false, east: false, west: false };
+  scene.traverse((obj) => {
+    if (!obj._isRoad) return;
+    const rx = obj.userData && obj.userData.x;
+    const rz = obj.userData && obj.userData.z;
+    if (typeof rx !== 'number' || typeof rz !== 'number') return;
+    if (Math.abs(rx - x) < 0.1 && Math.abs(rz - (z - 6)) < 0.1) neighbors.north = true;
+    if (Math.abs(rx - x) < 0.1 && Math.abs(rz - (z + 6)) < 0.1) neighbors.south = true;
+    if (Math.abs(rz - z) < 0.1 && Math.abs(rx - (x + 6)) < 0.1) neighbors.east = true;
+    if (Math.abs(rz - z) < 0.1 && Math.abs(rx - (x - 6)) < 0.1) neighbors.west = true;
+  });
+
+  // Mark intersection when roads exist in both axes
+  if ((neighbors.north || neighbors.south) && (neighbors.east || neighbors.west)) {
+    road.userData.isIntersection = true;
+    road.userData.intersection = { occupants: [], waiting: [] };
+  }
+
+  // Determine lane orientation for this road (ns, ew, or both)
+  road.userData.hasNS = neighbors.north || neighbors.south;
+  road.userData.hasEW = neighbors.east || neighbors.west;
+
+  // Create traffic light only at intersections (with higher chance)
+  if (road.userData.isIntersection && Math.random() < 0.8) {
+    createTrafficLight(x, z, neighbors);
   }
 
   // Check if we should add a street lamp
@@ -2667,71 +2964,82 @@ function createRoad(x, z) {
 }
 
 // Create a traffic light
-function createTrafficLight(x, z) {
+function createTrafficLight(x, z, neighbors = { north: false, south: false, east: false, west: false }) {
   const trafficLightGroup = new THREE.Group();
-  trafficLightGroup.position.set(x + 2, 0, z + 2);
+  trafficLightGroup.position.set(x, 0, z);
 
-  // Create pole
-  const poleGeometry = new THREE.CylinderGeometry(0.1, 0.1, 3, 8);
+  const poleGeometry = new THREE.CylinderGeometry(0.12, 0.12, 3, 8);
   const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-  const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-  pole.position.y = 1.5;
-  trafficLightGroup.add(pole);
+  const armGeometry = new THREE.CylinderGeometry(0.06, 0.06, 3, 8);
+  const housingGeometry = new THREE.BoxGeometry(0.5, 1, 0.4);
 
-  // Create light housing
-  const housingGeometry = new THREE.BoxGeometry(0.4, 1, 0.4);
-  const housingMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
-  const housing = new THREE.Mesh(housingGeometry, housingMaterial);
-  housing.position.y = 2.5;
-  trafficLightGroup.add(housing);
+  // We'll collect the light materials so the traffic system can update them
+  const lights = [];
 
-  // Create lights
-  const lightGeometry = new THREE.CircleGeometry(0.1, 16);
+  function addApproach(offsetX, offsetZ, armRotationAxis) {
+    const approach = new THREE.Group();
+    approach.position.set(offsetX, 0, offsetZ);
 
-  // Red light
-  const redLightMaterial = new THREE.MeshStandardMaterial({
-    color: 0xff0000,
-    emissive: 0xff0000,
-    emissiveIntensity: 0.8,
-  });
-  const redLight = new THREE.Mesh(lightGeometry, redLightMaterial);
-  redLight.position.set(0, 2.8, 0.21);
-  redLight.rotation.x = -Math.PI / 2;
-  trafficLightGroup.add(redLight);
+    // pole
+    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+    pole.position.y = 1.5;
+    approach.add(pole);
 
-  // Yellow light
-  const yellowLightMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffff00,
-    emissive: 0xffff00,
-    emissiveIntensity: 0.5,
-  });
-  const yellowLight = new THREE.Mesh(lightGeometry, yellowLightMaterial);
-  yellowLight.position.set(0, 2.5, 0.21);
-  yellowLight.rotation.x = -Math.PI / 2;
-  trafficLightGroup.add(yellowLight);
+    // arm reaching toward the center of the intersection
+    const arm = new THREE.Mesh(armGeometry, poleMaterial);
+    arm.position.y = 2.5;
+    if (armRotationAxis === 'x') {
+      arm.rotation.x = Math.PI / 2; // along Z axis
+      arm.position.z += (offsetZ < 0 ? 1.5 : -1.5);
+    } else {
+      arm.rotation.z = Math.PI / 2; // along X axis
+      arm.position.x += (offsetX < 0 ? 1.5 : -1.5);
+    }
+    approach.add(arm);
 
-  // Green light
-  const greenLightMaterial = new THREE.MeshStandardMaterial({
-    color: 0x00ff00,
-    emissive: 0x00ff00,
-    emissiveIntensity: 0.5,
-  });
-  const greenLight = new THREE.Mesh(lightGeometry, greenLightMaterial);
-  greenLight.position.set(0, 2.2, 0.21);
-  greenLight.rotation.x = -Math.PI / 2;
-  trafficLightGroup.add(greenLight);
+    // housing at the end of the arm (near the center)
+    const housing = new THREE.Mesh(housingGeometry, new THREE.MeshStandardMaterial({ color: 0x222222 }));
+    housing.position.y = 2.5;
+    if (armRotationAxis === 'x') housing.position.z += (offsetZ < 0 ? 3 : -3);
+    else housing.position.x += (offsetX < 0 ? 3 : -3);
+    approach.add(housing);
 
-  // Store materials for animation
+    // three small lights (spheres) stacked vertically on the housing
+    const redMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x550000, emissiveIntensity: 0.2 });
+    const yellowMat = new THREE.MeshStandardMaterial({ color: 0x555500, emissive: 0x555500, emissiveIntensity: 0.1 });
+    const greenMat = new THREE.MeshStandardMaterial({ color: 0x005500, emissive: 0x005500, emissiveIntensity: 0.1 });
+
+    const sGeo = new THREE.SphereGeometry(0.12, 8, 8);
+    const r = new THREE.Mesh(sGeo, redMat);
+    const y = new THREE.Mesh(sGeo, yellowMat);
+    const g = new THREE.Mesh(sGeo, greenMat);
+
+    r.position.set(housing.position.x, housing.position.y + 0.25, housing.position.z + 0.25);
+    y.position.set(housing.position.x, housing.position.y, housing.position.z + 0.25);
+    g.position.set(housing.position.x, housing.position.y - 0.25, housing.position.z + 0.25);
+
+    approach.add(r);
+    approach.add(y);
+    approach.add(g);
+
+    lights.push({ red: r.material, yellow: y.material, green: g.material });
+
+    trafficLightGroup.add(approach);
+  }
+
+  // Add approaches based on neighbor roads so lights overhang toward the center
+  if (neighbors.north) addApproach(0, -3, 'x');
+  if (neighbors.south) addApproach(0, 3, 'x');
+  if (neighbors.east) addApproach(3, 0, 'z');
+  if (neighbors.west) addApproach(-3, 0, 'z');
+
   trafficLightGroup.userData = {
-    redLight: redLightMaterial,
-    yellowLight: yellowLightMaterial,
-    greenLight: greenLightMaterial,
-    state: "red",
+    lights: lights,
+    state: 'red',
     timer: 0,
   };
 
   trafficLightGroup._isTrafficLight = true;
-
   scene.add(trafficLightGroup);
 }
 
