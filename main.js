@@ -849,9 +849,20 @@ function findNearestGasStation(pos) {
 function spawnCarOnRoad() {
   const roads = getRoadNetwork();
   if (roads.length === 0) return null;
-  const startRoad = roads[Math.floor(Math.random() * roads.length)].obj;
-  const path = buildRoadPath(startRoad);
-  if (path.length < 2) return null;
+
+  // Try multiple random start roads to find a multi-node path
+  let path = [];
+  const shuffled = roads.slice();
+  for (let attempt = 0; attempt < shuffled.length; attempt++) {
+    const idx = Math.floor(Math.random() * shuffled.length);
+    const startRoad = shuffled[idx].obj;
+    path = buildRoadPath(startRoad);
+    if (path.length >= 2) break;
+    // remove tried element to avoid infinite loop
+    shuffled.splice(idx, 1);
+    if (shuffled.length === 0) break;
+  }
+  if (!path || path.length < 2) return null;
   
   const car = new THREE.Group();
   const body = new THREE.Mesh(
@@ -2956,6 +2967,31 @@ function createRoad(x, z) {
   if (road.userData.isIntersection && Math.random() < 0.8) {
     createTrafficLight(x, z, neighbors);
   }
+
+  // Re-evaluate neighbor roads: they might have become intersections now
+  scene.traverse((obj) => {
+    if (!obj._isRoad) return;
+    const rx = obj.userData && obj.userData.x;
+    const rz = obj.userData && obj.userData.z;
+    if (typeof rx !== 'number' || typeof rz !== 'number') return;
+    const n = { north: false, south: false, east: false, west: false };
+    scene.traverse((o2) => {
+      if (!o2._isRoad) return;
+      const r2x = o2.userData && o2.userData.x;
+      const r2z = o2.userData && o2.userData.z;
+      if (typeof r2x !== 'number' || typeof r2z !== 'number') return;
+      if (Math.abs(r2x - rx) < 0.1 && Math.abs(r2z - (rz - 6)) < 0.1) n.north = true;
+      if (Math.abs(r2x - rx) < 0.1 && Math.abs(r2z - (rz + 6)) < 0.1) n.south = true;
+      if (Math.abs(r2z - rz) < 0.1 && Math.abs(r2x - (rx + 6)) < 0.1) n.east = true;
+      if (Math.abs(r2z - rz) < 0.1 && Math.abs(r2x - (rx - 6)) < 0.1) n.west = true;
+    });
+    const becameIntersection = (n.north || n.south) && (n.east || n.west);
+    if (becameIntersection && !obj.userData.isIntersection) {
+      obj.userData.isIntersection = true;
+      obj.userData.intersection = obj.userData.intersection || { occupants: [], waiting: [] };
+      if (Math.random() < 0.8) createTrafficLight(rx, rz, n);
+    }
+  });
 
   // Check if we should add a street lamp
   if (Math.random() < 0.3) {
